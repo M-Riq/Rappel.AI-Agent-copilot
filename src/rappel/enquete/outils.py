@@ -10,6 +10,11 @@ NIVEAUX_LOG_IGNORES = ("info",)
 MOTS_ETAT_SAIN = ("passed", "healthy", "recovered", "succeeded", "ok")
 MOTS_RESSOURCES = ("memory", "memoire", "disk", "disque", "oom")
 MOTS_RESEAU = ("timeout", "connection", "connexion", "network", "reseau")
+TYPE_INCONNU = "?"
+MOTS_SCHEMA_COMMITS = (r"rename(?:d|s)?", r"renaming", r"renomm\w*", r"types?", r"columns?", r"colonnes?", r"schemas?")
+MOTS_SCHEMA_LOGS = (r"columns?", r"colonnes?", r"types?", "keyerror")
+MOTS_CONFIGURATION = ("config", r"configurations?", r"parametres?", r"parameters?")
+MOTIF_ENTETE_HTTP = r"\bcontent-type\b"
 
 
 def normaliser(texte: str) -> str:
@@ -22,10 +27,11 @@ def normaliser(texte: str) -> str:
 def colonnes(schema: list[str]) -> dict[str, str]:
     resultat = {}
     for colonne in schema:
-        nom, separateur, type_colonne = colonne.partition(":")
-        if not separateur or not nom or not type_colonne or nom in resultat:
-            raise ValueError("Chaque colonne doit avoir un nom unique au format nom:type")
-        resultat[nom] = type_colonne
+        nom, _, type_colonne = colonne.partition(":")
+        nom = nom.strip()
+        if not nom or nom in resultat:
+            continue
+        resultat[nom] = type_colonne.strip() or TYPE_INCONNU
     return resultat
 
 
@@ -36,7 +42,7 @@ def ecarts_schema(contexte: ContexteIncident) -> list[str]:
     for nom, type_colonne in attendu.items():
         if nom not in observe:
             preuves.append(f"schema: colonne manquante {nom}:{type_colonne}")
-        elif observe[nom] != type_colonne:
+        elif TYPE_INCONNU not in (observe[nom], type_colonne) and observe[nom] != type_colonne:
             preuves.append(
                 f"schema: type different pour {nom}: attendu {type_colonne}, observe {observe[nom]}"
             )
@@ -51,6 +57,11 @@ def log_etat_sain(template: str) -> bool:
     return bool(termes.intersection(NIVEAUX_LOG_IGNORES + MOTS_ETAT_SAIN))
 
 
+def contient_mot(texte: str, motifs: tuple[str, ...]) -> bool:
+    texte = re.sub(MOTIF_ENTETE_HTTP, " ", normaliser(texte))
+    return any(re.search(rf"\b(?:{motif})\b", texte) for motif in motifs)
+
+
 def preuves_logs(
     contexte: ContexteIncident, mots: tuple[str, ...], seuil: int,
     exclure_etats_sains: bool = False,
@@ -58,7 +69,7 @@ def preuves_logs(
     return [
         f"logs: {log.template} (compte={log.compte})"
         for log in contexte.logs
-        if log.compte > seuil and any(mot in normaliser(log.template) for mot in mots)
+        if log.compte > seuil and contient_mot(log.template, mots)
         and (not exclure_etats_sains or not log_etat_sain(log.template))
     ]
 
@@ -67,15 +78,15 @@ def preuves_commits(contexte: ContexteIncident, mots: tuple[str, ...]) -> list[s
     return [
         f"commits: {commit.hash}: {commit.message} ({commit.date})"
         for commit in contexte.commits_recents
-        if any(mot in normaliser(commit.message) for mot in mots)
+        if contient_mot(commit.message, mots)
     ]
 
 
 def tester_schema(contexte: ContexteIncident) -> list[str]:
     return (
         ecarts_schema(contexte)
-        + preuves_commits(contexte, ("rename", "renomm", "type", "column", "colonne", "schema"))
-        + preuves_logs(contexte, ("column", "colonne", "type", "keyerror"), 0)
+        + preuves_commits(contexte, MOTS_SCHEMA_COMMITS)
+        + preuves_logs(contexte, MOTS_SCHEMA_LOGS, 0)
     )
 
 
@@ -92,4 +103,4 @@ def tester_reseau(contexte: ContexteIncident) -> list[str]:
 
 
 def tester_configuration(contexte: ContexteIncident) -> list[str]:
-    return preuves_commits(contexte, ("config", "configuration", "parametre", "parameter"))
+    return preuves_commits(contexte, MOTS_CONFIGURATION)

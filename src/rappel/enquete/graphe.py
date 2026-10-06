@@ -14,7 +14,7 @@ from ..contrats import (
 from ..interfaces.abstention import Abstention, DecisionAbstention
 from ..interfaces.llm import LLM
 from ..interfaces.memoire import Memoire
-from . import outils
+from . import outils, war_room
 
 
 @dataclass
@@ -26,6 +26,10 @@ class MetriquesEnquete:
     duree_ms: float = 0.0
     nb_tokens_entree: int | None = None
     nb_tokens_sortie: int | None = None
+    nb_tours_war_room: int = 0
+    nb_objections: int = 0
+    nb_objections_sans_reponse: int = 0
+    nb_appels_llm_war_room: int = 0
 
 
 class CandidatDetective(BaseModel):
@@ -64,6 +68,10 @@ class EtatEnquete(TypedDict, total=False):
     nb_ecartees_par_memoire: int
     nb_appels_llm: int
     erreur_llm: str | None
+    nb_tours_war_room: int
+    nb_objections: int
+    nb_objections_sans_reponse: int
+    nb_appels_llm_war_room: int
 
 
 def maintenant() -> str:
@@ -128,7 +136,10 @@ def construire_prompt(contexte: ContexteIncident) -> str:
 def creer_graphe(
     memoire: Memoire, llm: LLM, abstention: Abstention,
     sur_evenement: Callable[[EvenementEnquete], None] | None = None,
+    configuration_war_room: war_room.ConfigurationWarRoom | None = None,
 ):
+    config_debat = configuration_war_room or war_room.configuration()
+
     def emettre(etat: EtatEnquete, type_evenement: str, acteur: str, texte: str) -> None:
         evenement(etat, type_evenement, acteur, texte)
         if sur_evenement is not None:
@@ -229,6 +240,11 @@ def creer_graphe(
         etat.update(hypotheses=hypotheses, retenue=retenue)
         return etat
 
+    def debattre(etat: EtatEnquete):
+        if not config_debat.active or etat.get("retenue") is None:
+            return {}
+        return war_room.executer_debat(preparer(etat), llm, config_debat, emettre)
+
     def evaluer_confiance(etat: EtatEnquete):
         etat = preparer(etat)
         retenue = etat["retenue"]
@@ -316,13 +332,14 @@ def creer_graphe(
     noeuds = {
         "charger_contexte": charger_contexte, "consulter_memoire": consulter_memoire,
         "generer_hypotheses": generer_hypotheses, "tester_hypotheses": tester_hypotheses,
+        "war_room": debattre,
         "evaluer_confiance": evaluer_confiance, "abstention": terminer_abstention,
         "conclure": conclure, "ecrire_memoire": ecrire_memoire,
     }
     for nom, fonction in noeuds.items():
         graphe.add_node(nom, fonction)
     sequence = [START, "charger_contexte", "consulter_memoire", "generer_hypotheses",
-                "tester_hypotheses", "evaluer_confiance"]
+                "tester_hypotheses", "war_room", "evaluer_confiance"]
     for depart, arrivee in zip(sequence, sequence[1:]):
         graphe.add_edge(depart, arrivee)
     graphe.add_conditional_edges("evaluer_confiance", orienter,
@@ -337,10 +354,14 @@ def enqueter(
     contexte: ContexteIncident | dict, memoire: Memoire, llm: LLM, abstention: Abstention,
     resultat: Literal["reussi", "echoue"] = "reussi",
     sur_evenement: Callable[[EvenementEnquete], None] | None = None,
+    war_room_active: bool | None = None,
+    war_room_max_tours: int | None = None,
+    war_room_max_appels_llm: int | None = None,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
         raise ValueError("resultat doit etre reussi ou echoue")
+    config_debat = war_room.configuration(war_room_active, war_room_max_tours, war_room_max_appels_llm)
     debut = perf_counter()
     if hasattr(llm, "debut_execution"):
         llm.debut_execution()
@@ -348,11 +369,15 @@ def enqueter(
     appels_avant = getattr(usage, "nb_appels", None)
     entree_avant = getattr(usage, "tokens_entree", None)
     sortie_avant = getattr(usage, "tokens_sortie", None)
-    etat = creer_graphe(memoire, llm, abstention, sur_evenement=sur_evenement).invoke({
+    etat = creer_graphe(
+        memoire, llm, abstention, sur_evenement=sur_evenement, configuration_war_room=config_debat,
+    ).invoke({
         "contexte": contexte, "evenements": [], "hypotheses": [],
         "correctif": None, "enregistrement": None, "resultat_action": resultat,
         "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
         "erreur_llm": None,
+        "nb_tours_war_room": 0, "nb_objections": 0,
+        "nb_objections_sans_reponse": 0, "nb_appels_llm_war_room": 0,
     })
     usage_final = getattr(llm, "usage", None)
     entree_final = getattr(usage_final, "tokens_entree", None)
@@ -378,6 +403,10 @@ def enqueter(
             duree_ms=(perf_counter() - debut) * 1000,
             nb_tokens_entree=difference(entree_avant, entree_final),
             nb_tokens_sortie=difference(sortie_avant, sortie_final),
+            nb_tours_war_room=etat["nb_tours_war_room"],
+            nb_objections=etat["nb_objections"],
+            nb_objections_sans_reponse=etat["nb_objections_sans_reponse"],
+            nb_appels_llm_war_room=etat["nb_appels_llm_war_room"],
         ),
     )
 

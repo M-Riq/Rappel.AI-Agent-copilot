@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,20 @@ class LLMIndisponible(RuntimeError):
 
 class LLMBudgetEpuise(RuntimeError):
     """Plafond d'appels LLM de l'exécution atteint."""
+
+
+@contextmanager
+def limiter_appels(llm, restants: int):
+    budget = getattr(llm, "_budget", None)
+    if budget is None:
+        yield
+        return
+    maximum = budget.maximum
+    budget.maximum = min(maximum, budget.appels + restants)
+    try:
+        yield
+    finally:
+        budget.maximum = maximum
 
 
 @dataclass
@@ -274,10 +289,23 @@ class LLMFaux:
         self._budget.commencer()
 
     def completer(self, prompt: str, role: str = "detective") -> str:
-        del prompt
         self._budget.consommer()
         self.usage.nb_appels += 1
-        if role == "detective":
+        try:
+            donnees = json.loads(prompt.split("\nReponse invalide", 1)[0])
+        except (ValueError, TypeError):
+            donnees = None
+        if isinstance(donnees, dict) and donnees.get("mode") == "war_room":
+            if role == "sceptique":
+                objection = "Quelle preuve des outils confirme cette hypothese ?" if donnees["tour"] == 1 else None
+                texte = json.dumps({"objection": objection, "preuve_manquante": None})
+            elif role == "detective":
+                preuves = donnees.get("preuves", [])
+                texte = json.dumps({"reponse": "Voici une preuve fournie par les outils",
+                                    "preuves_citees": preuves[:1]})
+            else:
+                raise ValueError("Role de debat inconnu")
+        elif role == "detective":
             texte = json.dumps([
                 {"texte": "Le schema des donnees a change", "categorie": "schema"},
                 {"texte": "Saturation des ressources", "categorie": "ressources"},

@@ -1,7 +1,13 @@
+import json
+
 import pytest
 
 from src.rappel.contrats import ContexteIncident
 from src.rappel.enquete import outils
+from src.rappel.enquete import enqueter
+from src.rappel.interfaces.abstention import AbstentionSeuil
+from src.rappel.interfaces.llm import LLMFaux
+from src.rappel.interfaces.memoire import MemoireJSON
 
 
 def contexte(schema=None, logs=None, commits=None):
@@ -92,3 +98,78 @@ def test_info_exclu_sans_mot_etat_sain(outil):
 def test_ok_ne_correspond_pas_a_une_sous_chaine():
     incident = contexte(logs=[{"template": "ERROR connection broken", "compte": 1000}])
     assert len(outils.tester_reseau(incident)) == 1
+
+
+def test_schema_sans_types_detecte_renommage():
+    incident = contexte({"attendu": ["id", "ancien"], "observe": ["id", "nouveau"]})
+    assert outils.colonnes(incident.schema.attendu) == {"id": "?", "ancien": "?"}
+    assert outils.ecarts_schema(incident) == [
+        "schema: colonne manquante ancien:?", "schema: nouvelle colonne nouveau:?"
+    ]
+
+
+def test_schema_mixte_ignore_types_inconnus():
+    incident = contexte({
+        "attendu": ["id", "prix:float", "date:date", "etat:int", "", "  "],
+        "observe": ["id:int", "prix", "date:str", "etat:"],
+    })
+    assert outils.ecarts_schema(incident) == [
+        "schema: type different pour date: attendu date, observe str"
+    ]
+
+
+def test_doublon_garde_premiere_occurrence():
+    assert outils.colonnes(["id", "id:int", "prix:float", "prix:str", "", ":int"]) == {
+        "id": "?", "prix": "float"
+    }
+
+
+def test_enquete_schema_sans_types(tmp_path):
+    incident = contexte({"attendu": ["id", "ancien"], "observe": ["id", "nouveau"]})
+    resultat = enqueter(incident, MemoireJSON(tmp_path / "memoire.json"), LLMFaux(), AbstentionSeuil())
+    assert resultat.correctif is not None
+    assert "renomm" in resultat.correctif.justification
+    patch = json.loads(resultat.correctif.patch)
+    assert patch["avant"] == ["id", "nouveau"]
+    assert patch["apres"] == ["id", "ancien"]
+
+
+def test_room_ne_declenche_pas_oom():
+    incident = contexte(logs=[{"template": "ERROR room unavailable", "compte": 1000}])
+    assert outils.tester_ressources(incident) == []
+
+
+@pytest.mark.parametrize("template", ["ERROR OOM killed", "ERROR out of memory"])
+def test_erreurs_ressources_mots_entiers(template):
+    incident = contexte(logs=[{"template": template, "compte": outils.SEUIL_LOG_RESSOURCES + 1}])
+    assert len(outils.tester_ressources(incident)) == 1
+
+
+def test_content_type_seul_pas_indice_schema():
+    incident = contexte(
+        {"attendu": ["id:int"], "observe": ["id:int"]},
+        logs=[{"template": "ERROR content-type invalid", "compte": 10}],
+        commits=[{"hash": "abc", "message": "change content-type header", "date": "2026-10-15"}],
+    )
+    assert outils.tester_schema(incident) == []
+
+
+def test_content_type_ne_masque_pas_vrai_indice_schema():
+    incident = contexte(
+        {"attendu": ["id:int"], "observe": ["id:int"]},
+        logs=[{"template": "ERROR content-type invalid; column missing", "compte": 10}],
+    )
+    assert len(outils.tester_schema(incident)) == 1
+
+
+@pytest.mark.parametrize("mot", ["rename", "renamed", "renaming", "renommer", "renommé"])
+def test_commits_renommage_variantes(mot):
+    incident = contexte(commits=[{"hash": "abc", "message": f"{mot} field", "date": "2026-10-15"}])
+    assert len(outils.preuves_commits(incident, outils.MOTS_SCHEMA_COMMITS)) == 1
+
+
+@pytest.mark.parametrize("mot", ["prototype", "room", "preconfiguration", "prerenommer"])
+def test_commits_pas_sous_chaines(mot):
+    incident = contexte(commits=[{"hash": "abc", "message": mot, "date": "2026-10-15"}])
+    assert outils.preuves_commits(incident, outils.MOTS_SCHEMA_COMMITS) == []
+    assert outils.tester_configuration(incident) == []
