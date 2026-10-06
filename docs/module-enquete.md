@@ -19,6 +19,7 @@ enqueter(
     resultat="reussi", sur_evenement=None,
     war_room_active=None, war_room_max_tours=None,
     war_room_max_appels_llm=None,
+    traceur=None,
 )
 ```
 
@@ -59,6 +60,50 @@ Une etape vaut `len(evenements) + 1`, l'horodatage est genere en UTC ISO.
 dans l'ordre. Une exception du callback interrompt l'enquete.
 `ecrire_evenements_jsonl(evenements, chemin)` cree les parents et ecrit une ligne
 JSON par evenement ; la fonction n'impose ni dossier ni extension.
+
+### Tracage optionnel (A14)
+
+[traceur.py](../src/rappel/interfaces/traceur.py) definit le Protocol `Traceur` :
+`demarrer(incident_id, signature)`, `evenement(EvenementEnquete)` et
+`terminer(metriques: dict, decision: str)`. `enqueter(..., traceur=None)` utilise
+`TraceurNul`, sans charger le SDK. Le demarrage intervient au premier evenement
+du contexte valide, puis un appel par evenement, puis la fin avec les metriques
+et `correctif_propose` ou `abstention`. Une enquete en erreur apres demarrage
+termine la trace avec seulement `duree_ms` et `erreur`, jamais le detail d'exception.
+Si la validation echoue avant le premier evenement, aucune trace n'est demarree.
+
+Le traceur est branche sur la callback existante sans modifier les decisions ni
+les evenements. Une callback utilisateur conserve sa semantique : ses erreurs
+interrompent l'enquete ; les erreurs du traceur, elles, sont ignorees, comptees
+dans `nb_erreurs` du traceur protege et averties une seule fois par instance.
+Les compteurs ne sont pas ajoutes aux metriques de decision. La duree mesuree
+peut inclure le temps passe a transmettre les evenements.
+
+`creer_app(..., traceur=None)` construit `creer_traceur()` par defaut, y compris
+pour l'instance API globale. Sans les deux cles, sans paquet, ou si la liaison
+SDK est indisponible, retour `TraceurNul` et un avertissement generique au plus
+une fois par processus. Aucun paquet n'a ete ajoute au projet.
+
+`TraceurLangfuse(client)` accepte un client d'injection minimal. Son contrat local
+est `client.demarrer(dict)`, `client.evenement(dict)`, `client.terminer(dict)` :
+ces noms ne sont PAS presentes comme des methodes du vrai SDK. Le debut contient
+uniquement `incident_id` et `signature`, les evenements `type`, `acteur`, `etape`
+et, par defaut, `texte`. La fin contient uniquement `metriques` et `decision`.
+Ni contexte brut, prompts, en-tetes, cles ni objets de correctif ne sont transmis
+separement. Les textes peuvent toutefois contenir des extraits de logs/commits.
+`LANGFUSE_ENVOYER_TEXTES=0` retire completement le texte des evenements transmis.
+
+**Code pret, activation avec les cles, liaison au SDK a verifier.** Actuellement,
+`_AdaptateurLangfuseSDK` est volontairement non implemente : meme si le paquet
+est installe et les cles presentes, la factory revient au traceur nul tant que
+cette classe n'est pas branchee. Aucune trace distante n'est garantie a ce stade.
+Apres installation manuelle, verifier la version et son code/documentation pour :
+construction/authentification du client et option host, creation d'une trace racine,
+association des evenements a cette trace, mise a jour/finalisation avec metriques
+et decision, export/flush/fermeture et erreurs synchrones ou asynchrones.
+Verifier aussi les donnees effectivement envoyees et desactiver tout enrichissement
+automatique qui transmettrait d'autres donnees. Concentrer ces appels dans cette
+seule classe, sans deviner les noms du SDK.
 
 ### Metriques
 
@@ -134,8 +179,10 @@ deja present a priorite. War room lit `os.environ` et ne charge pas `.env` seule
 | `WAR_ROOM_ACTIVE`         | Interrupteur debat                                   | `0`, accepte seulement `0`/`1`                |
 | `WAR_ROOM_MAX_TOURS`      | Tours maximum                                        | `2`, entier >= 0                              |
 | `WAR_ROOM_MAX_APPELS_LLM` | Budget physique du debat, relances/secours compris   | `6`, entier >= 0                              |
-| `LANGFUSE_PUBLIC_KEY`     | Reserve dans `.env.example`, non utilise             | Aucun ; pas d'integration                     |
-| `LANGFUSE_SECRET_KEY`     | Reserve dans `.env.example`, non utilise             | Aucun ; pas d'integration                     |
+| `LANGFUSE_PUBLIC_KEY` | Cle publique pour la factory du traceur optionnel | Vide ; sans les deux cles, traceur nul |
+| `LANGFUSE_SECRET_KEY` | Cle secrete pour la factory du traceur optionnel | Vide ; jamais affichee |
+| `LANGFUSE_HOST` | Hote a transmettre au futur adaptateur SDK | Vide ; aucun hote distant choisi par ce code |
+| `LANGFUSE_ENVOYER_TEXTES` | Envoyer les textes des evenements ; `0` les retire | `1` ; une valeur vide conserve l'envoi |
 
 Les parametres war room d'`enqueter` surchargent ces trois variables. Elles sont
 presentes dans `.env.example`, toutes avec une valeur vide ; les defauts sont
@@ -372,7 +419,10 @@ un identifiant d'incident.
 - Erreurs fournisseur assainies, cle absente du `repr` de l'adaptateur ; toutefois
   les contextes/reponses peuvent etre sensibles. Ne pas mettre de secrets dans
   les logs. Aucun filtre general n'assainit les evenements reussis du graphe/API.
-- Pas d'integration Langfuse ou Meterless, ni d'ingestion dans ce module.
+- Tracage optionnel teste par injection seulement : liaison au SDK Langfuse reel
+  non branchee. Les textes sont envoyes par defaut au client injecte sans filtre
+  de secrets ; choisir `LANGFUSE_ENVOYER_TEXTES=0` pour ne pas les transmettre.
+- Pas d'integration Meterless ni d'ingestion dans ce module.
   L'avertissement Pydantic sur le champ partage `schema` est connu ; le nom est conserve.
 
 ## 8. Checklist A1 a A15
@@ -394,10 +444,11 @@ Le statut concerne les tests presents, pas une certification en production.
 | A11  | Fait                                   | Trois acteurs, evenements et plafonds locaux/globaux : [test_war_room.py](../tests/test_war_room.py)                                                                             |
 | A12  | Fait                                   | Debat desactive identique au graphe sans noeud, temps fixes pour comparaison : `test_a12_identique_au_graphe_sans_noeud`                                                         |
 | A13  | Fait en simulation ; reel a faire      | Factory, formats HTTP, usage, erreurs et secours : [test_llm_fournisseurs.py](../tests/test_llm_fournisseurs.py)                                                                 |
-| A14  | A faire avec l'interface ; non integre | Chaque execution de l'enquete doit laisser une trace Langfuse. L'integration n'existe pas encore et aucun test ne la valide.                                                     |
+| A14 | Code pret, activation avec les cles, liaison au SDK a verifier | Cycle debut/evenements/fin, absence de fuite dans les erreurs et non-regression testes avec client injecte dans [test_traceur.py](../tests/test_traceur.py). Adaptateur SDK non branche : aucune trace distante garantie. |
 | A15  | A faire ; non mesure                   | P1 rejouee 5 fois avec un vrai LLM doit donner la meme conclusion au moins 4 fois sur 5. Necessite une cle et une mesure reelle ; les tests factices ne valident pas ce critere. |
 
 [test_api.py](../tests/test_api.py), [test_scripts_essai.py](../tests/test_scripts_essai.py)
 et [test_demo_enquete.py](../tests/test_demo_enquete.py) ajoutent des validations
-d'integration locale, de confirmation de cout et d'export. Ils ne valident ni
-les traces Langfuse d'A14 ni la stabilite avec un vrai LLM d'A15.
+d'integration locale, de confirmation de cout et d'export. Les tests du traceur
+valident A14 par injection, pas l'envoi effectif au service Langfuse. La stabilite
+avec un vrai LLM d'A15 reste non mesuree.

@@ -13,6 +13,7 @@ from .enquete import enqueter
 from .interfaces.abstention import Abstention, AbstentionSeuil
 from .interfaces.llm import LLM, creer_llm
 from .interfaces.memoire import Memoire, MemoireJSON
+from .interfaces.traceur import Traceur, creer_traceur, proteger_traceur
 
 
 class DecisionHumaine(BaseModel):
@@ -29,7 +30,9 @@ def creer_app(
     memoire: Memoire, llm: LLM, abstention: Abstention,
     executeur_enquete: Callable[[Callable[[], None]], object] | None = None,
     executeur_action: Callable[[str, CorrectifPropose], None] | None = None,
+    traceur: Traceur | None = None,
 ) -> FastAPI:
+    suivi = proteger_traceur(creer_traceur() if traceur is None else traceur)
     incidents = {}
     verrou = RLock()
     verrou_execution = RLock()
@@ -68,7 +71,8 @@ def creer_app(
         try:
             # Les dependances partagees ont des budgets et une memoire mutables.
             with verrou_execution:
-                resultat = enqueter(contexte, memoire, llm, abstention, sur_evenement=recevoir)
+                resultat = enqueter(contexte, memoire, llm, abstention,
+                                    sur_evenement=recevoir, traceur=suivi)
             with verrou:
                 incident = obtenir(contexte.incident_id)
                 incident["resultat"] = resultat

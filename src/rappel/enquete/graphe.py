@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ from ..contrats import (
 from ..interfaces.abstention import Abstention, DecisionAbstention
 from ..interfaces.llm import LLM
 from ..interfaces.memoire import Memoire
+from ..interfaces.traceur import Traceur, proteger_traceur
 from . import outils, war_room
 
 
@@ -357,11 +358,25 @@ def enqueter(
     war_room_active: bool | None = None,
     war_room_max_tours: int | None = None,
     war_room_max_appels_llm: int | None = None,
+    traceur: Traceur | None = None,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
         raise ValueError("resultat doit etre reussi ou echoue")
     config_debat = war_room.configuration(war_room_active, war_room_max_tours, war_room_max_appels_llm)
+    suivi = proteger_traceur(traceur)
+    trace_demarre = False
+
+    def transmettre(evenement_recu: EvenementEnquete) -> None:
+        nonlocal trace_demarre
+        if not trace_demarre:
+            signature = contexte.signature if isinstance(contexte, ContexteIncident) else contexte["signature"]
+            suivi.demarrer(evenement_recu.incident_id, signature)
+            trace_demarre = True
+        suivi.evenement(evenement_recu.model_copy(deep=True))
+        if sur_evenement is not None:
+            sur_evenement(evenement_recu)
+
     debut = perf_counter()
     if hasattr(llm, "debut_execution"):
         llm.debut_execution()
@@ -369,16 +384,22 @@ def enqueter(
     appels_avant = getattr(usage, "nb_appels", None)
     entree_avant = getattr(usage, "tokens_entree", None)
     sortie_avant = getattr(usage, "tokens_sortie", None)
-    etat = creer_graphe(
-        memoire, llm, abstention, sur_evenement=sur_evenement, configuration_war_room=config_debat,
-    ).invoke({
-        "contexte": contexte, "evenements": [], "hypotheses": [],
-        "correctif": None, "enregistrement": None, "resultat_action": resultat,
-        "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
-        "erreur_llm": None,
-        "nb_tours_war_room": 0, "nb_objections": 0,
-        "nb_objections_sans_reponse": 0, "nb_appels_llm_war_room": 0,
-    })
+    try:
+        etat = creer_graphe(
+            memoire, llm, abstention, sur_evenement=transmettre,
+            configuration_war_room=config_debat,
+        ).invoke({
+            "contexte": contexte, "evenements": [], "hypotheses": [],
+            "correctif": None, "enregistrement": None, "resultat_action": resultat,
+            "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
+            "erreur_llm": None,
+            "nb_tours_war_room": 0, "nb_objections": 0,
+            "nb_objections_sans_reponse": 0, "nb_appels_llm_war_room": 0,
+        })
+    except Exception:
+        if trace_demarre:
+            suivi.terminer({"duree_ms": (perf_counter() - debut) * 1000}, "erreur")
+        raise
     usage_final = getattr(llm, "usage", None)
     entree_final = getattr(usage_final, "tokens_entree", None)
     sortie_final = getattr(usage_final, "tokens_sortie", None)
@@ -389,7 +410,7 @@ def enqueter(
             return None
         return apres if avant is None else apres - avant
 
-    return ResultatEnquete(
+    resultat_enquete = ResultatEnquete(
         hypotheses=etat["hypotheses"], evenements=etat["evenements"],
         correctif=etat["correctif"], decision_abstention=etat["decision_abstention"],
         enregistrement=etat["enregistrement"],
@@ -409,6 +430,9 @@ def enqueter(
             nb_appels_llm_war_room=etat["nb_appels_llm_war_room"],
         ),
     )
+    suivi.terminer(asdict(resultat_enquete.metriques),
+                   "abstention" if resultat_enquete.decision_abstention.abstient else "correctif_propose")
+    return resultat_enquete
 
 
 def ecrire_evenements_jsonl(evenements: list[EvenementEnquete], chemin: str | Path) -> None:
