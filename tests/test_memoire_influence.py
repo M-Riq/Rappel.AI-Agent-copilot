@@ -146,17 +146,12 @@ def test_non_regression_memoire_vide(tmp_path):
     candidats = json.loads(LLMFaux().completer(""))
     attendues = []
     for indice, candidat in enumerate(candidats, start=1):
-        preuves = preuves_schema if indice == 1 else (
-            ["logs: INFO orders_etl: source connection health check passed (compte=12)"] if indice == 3 else []
-        )
+        preuves = preuves_schema if indice == 1 else []
         attendues.append({
             "id": f"inc-p1-0001:hyp-{indice}", "incident_id": "inc-p1-0001",
             "texte": candidat["texte"], "statut": "retenue" if indice == 1 else "refutee",
-            "preuves": preuves, "confiance": 0.95 if indice == 1 else (0.3 if indice == 3 else 0.0),
-            "raison_rejet": None if indice == 1 else (
-                "ecartee au profit de Le schema des donnees a change" if indice == 3
-                else "Aucune preuve fournie par l'outil"
-            ),
+            "preuves": preuves, "confiance": 0.95 if indice == 1 else 0.0,
+            "raison_rejet": None if indice == 1 else "Aucune preuve fournie par l'outil",
         })
     assert [hypothese.model_dump() for hypothese in resultat.hypotheses] == attendues
     description = "Restaurer le schema attendu de orders_etl: id:int, amount:float"

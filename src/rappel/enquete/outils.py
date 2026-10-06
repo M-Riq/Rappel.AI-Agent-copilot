@@ -1,3 +1,4 @@
+import re
 import unicodedata
 
 from ..contrats import ContexteIncident
@@ -5,6 +6,10 @@ from ..contrats import ContexteIncident
 
 SEUIL_LOG_RESSOURCES = 5
 SEUIL_LOG_RESEAU = 5
+NIVEAUX_LOG_IGNORES = ("info",)
+MOTS_ETAT_SAIN = ("passed", "healthy", "recovered", "succeeded", "ok")
+MOTS_RESSOURCES = ("memory", "memoire", "disk", "disque", "oom")
+MOTS_RESEAU = ("timeout", "connection", "connexion", "network", "reseau")
 
 
 def normaliser(texte: str) -> str:
@@ -41,11 +46,20 @@ def ecarts_schema(contexte: ContexteIncident) -> list[str]:
     return preuves
 
 
-def preuves_logs(contexte: ContexteIncident, mots: tuple[str, ...], seuil: int) -> list[str]:
+def log_etat_sain(template: str) -> bool:
+    termes = set(re.findall(r"\b\w+\b", normaliser(template)))
+    return bool(termes.intersection(NIVEAUX_LOG_IGNORES + MOTS_ETAT_SAIN))
+
+
+def preuves_logs(
+    contexte: ContexteIncident, mots: tuple[str, ...], seuil: int,
+    exclure_etats_sains: bool = False,
+) -> list[str]:
     return [
         f"logs: {log.template} (compte={log.compte})"
         for log in contexte.logs
         if log.compte > seuil and any(mot in normaliser(log.template) for mot in mots)
+        and (not exclure_etats_sains or not log_etat_sain(log.template))
     ]
 
 
@@ -67,13 +81,13 @@ def tester_schema(contexte: ContexteIncident) -> list[str]:
 
 def tester_ressources(contexte: ContexteIncident) -> list[str]:
     return preuves_logs(
-        contexte, ("memory", "memoire", "disk", "disque", "oom"), SEUIL_LOG_RESSOURCES
+        contexte, MOTS_RESSOURCES, SEUIL_LOG_RESSOURCES, exclure_etats_sains=True
     )
 
 
 def tester_reseau(contexte: ContexteIncident) -> list[str]:
     return preuves_logs(
-        contexte, ("timeout", "connection", "connexion", "network", "reseau"), SEUIL_LOG_RESEAU
+        contexte, MOTS_RESEAU, SEUIL_LOG_RESEAU, exclure_etats_sains=True
     )
 
 

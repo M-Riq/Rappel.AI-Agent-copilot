@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from ..contrats import EnregistrementMemoire
 
@@ -11,6 +11,10 @@ class Memoire(Protocol):
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None: ...
 
     def hypotheses_refutees(self, signature: str) -> list[str]: ...
+
+    def mettre_a_jour_resultat(
+        self, signature: str, resultat: Literal["reussi", "echoue"]
+    ) -> bool: ...
 
 
 class MemoireJSON:
@@ -50,3 +54,20 @@ class MemoireJSON:
             for hypothese in enregistrement.hypotheses_refutees
         ]
         return list(dict.fromkeys(hypotheses))
+
+    def mettre_a_jour_resultat(
+        self, signature: str, resultat: Literal["reussi", "echoue"]
+    ) -> bool:
+        if resultat not in {"reussi", "echoue"}:
+            raise ValueError("resultat doit etre reussi ou echoue")
+        enregistrements = self._lire()
+        for indice in range(len(enregistrements) - 1, -1, -1):
+            if enregistrements[indice].signature == signature:
+                enregistrements[indice].resultat = resultat
+                contenu = json.dumps(
+                    [element.model_dump() for element in enregistrements],
+                    indent=2, ensure_ascii=True,
+                )
+                self.chemin.write_text(contenu + "\n", encoding="utf-8")
+                return True
+        return False

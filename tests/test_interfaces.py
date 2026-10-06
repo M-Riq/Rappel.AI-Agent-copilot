@@ -60,6 +60,19 @@ def test_memoire_chemin_par_defaut(tmp_path, monkeypatch):
     assert memoire.chercher("signature_inconnue") == []
 
 
+def test_memoire_mettre_a_jour_dernier_resultat(tmp_path, enregistrement):
+    memoire = MemoireJSON(tmp_path / "memoire.json")
+    memoire.ecrire(enregistrement)
+    memoire.ecrire(enregistrement.model_copy(update={"date": "2026-10-16"}))
+    assert memoire.mettre_a_jour_resultat(enregistrement.signature, "echoue")
+    assert [element.resultat for element in memoire.chercher(enregistrement.signature)] == [
+        "reussi", "echoue"
+    ]
+    assert not memoire.mettre_a_jour_resultat("inconnue", "echoue")
+    with pytest.raises(ValueError):
+        memoire.mettre_a_jour_resultat(enregistrement.signature, "invalide")
+
+
 @pytest.mark.parametrize("role", ["detective", "sceptique", "historien"])
 def test_llm_faux_reponse_json(role):
     llm = LLMFaux()

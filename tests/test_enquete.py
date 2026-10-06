@@ -48,6 +48,16 @@ def test_a3_evenements(enquete_initiale):
     valider_evenements(enquete_initiale[2])
 
 
+def test_callback_evenements_dans_ordre(tmp_path):
+    recus = []
+    resultat = enqueter(
+        charger("contexte_p1.json"), MemoireJSON(tmp_path / "memoire.json"),
+        LLMFaux(), AbstentionSeuil(), sur_evenement=recus.append,
+    )
+    assert recus == resultat.evenements
+    assert [element.etape for element in recus] == list(range(1, len(recus) + 1))
+
+
 def test_a4_correctif(enquete_initiale):
     correctif = enquete_initiale[2].correctif
     assert correctif is not None

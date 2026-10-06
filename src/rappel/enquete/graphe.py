@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Callable, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError
@@ -125,14 +125,22 @@ def construire_prompt(contexte: ContexteIncident) -> str:
     )
 
 
-def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
+def creer_graphe(
+    memoire: Memoire, llm: LLM, abstention: Abstention,
+    sur_evenement: Callable[[EvenementEnquete], None] | None = None,
+):
+    def emettre(etat: EtatEnquete, type_evenement: str, acteur: str, texte: str) -> None:
+        evenement(etat, type_evenement, acteur, texte)
+        if sur_evenement is not None:
+            sur_evenement(etat["evenements"][-1].model_copy(deep=True))
+
     def charger_contexte(etat: EtatEnquete):
         etat = preparer(etat)
         valeur = etat["contexte"]
         if isinstance(valeur, ContexteIncident):
             valeur = valeur.model_dump()
         etat["contexte"] = ContexteIncident.model_validate(valeur)
-        evenement(etat, "decision", "systeme", "Contexte valide, enquete ouverte")
+        emettre(etat, "decision", "systeme", "Contexte valide, enquete ouverte")
         return etat
 
     def consulter_memoire(etat: EtatEnquete):
@@ -145,7 +153,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
         if souvenirs:
             texte = "; ".join(decrire_souvenir(souvenir) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
-        evenement(etat, "preuve", "historien", texte)
+        emettre(etat, "preuve", "historien", texte)
         return etat
 
     def generer_hypotheses(etat: EtatEnquete):
@@ -166,14 +174,14 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
         if candidats is None:
             etat["erreur_llm"] = "Réponse du détective invalide après une nouvelle tentative"
             etat.update(hypotheses=[], categories={})
-            evenement(etat, "abstention", "systeme", "aucune hypothese valide : réponse LLM invalide")
+            emettre(etat, "abstention", "systeme", "aucune hypothese valide : réponse LLM invalide")
             return etat
         hypotheses = []
         categories = {}
         for indice, candidat in enumerate(candidats, start=1):
             if candidat.texte in etat["refutees_connues"]:
                 etat["nb_ecartees_par_memoire"] = etat.get("nb_ecartees_par_memoire", 0) + 1
-                evenement(etat, "rejet", "historien", f"Deja refutee en memoire: {candidat.texte}")
+                emettre(etat, "rejet", "historien", f"Deja refutee en memoire: {candidat.texte}")
                 continue
             hypothese = Hypothese(
                 id=f"{etat['contexte'].incident_id}:hyp-{indice}",
@@ -182,7 +190,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             )
             hypotheses.append(hypothese)
             categories[hypothese.id] = candidat.categorie
-            evenement(etat, "hypothese", "detective", hypothese.texte)
+            emettre(etat, "hypothese", "detective", hypothese.texte)
         etat.update(hypotheses=hypotheses, categories=categories)
         return etat
 
@@ -214,10 +222,10 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             hypotheses.append(nouvelle)
             if choisie:
                 retenue = nouvelle
-            evenement(etat, "preuve" if choisie else "rejet", "systeme",
+            emettre(etat, "preuve" if choisie else "rejet", "systeme",
                       f"{nouvelle.texte}: {json.dumps(indices)}; {raison or 'retenue'}")
         if not hypotheses:
-            evenement(etat, "rejet", "systeme", "Aucune hypothese disponible apres filtrage")
+            emettre(etat, "rejet", "systeme", "Aucune hypothese disponible apres filtrage")
         etat.update(hypotheses=hypotheses, retenue=retenue)
         return etat
 
@@ -240,13 +248,13 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
                     True, decision.confiance, [*decision.manque, "ecart de schema confirme"]
                 )
         etat["decision_abstention"] = decision
-        evenement(etat, "decision", "systeme",
+        emettre(etat, "decision", "systeme",
                   f"Confiance {decision.confiance:.2f}; abstention={decision.abstient}")
         return etat
 
     def terminer_abstention(etat: EtatEnquete):
         etat = preparer(etat)
-        evenement(etat, "abstention", "systeme", "; ".join(etat["decision_abstention"].manque)
+        emettre(etat, "abstention", "systeme", "; ".join(etat["decision_abstention"].manque)
                   or "Confiance insuffisante")
         return etat
 
@@ -284,7 +292,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             confiance=etat["decision_abstention"].confiance,
         )
         etat["correctif"] = correctif
-        evenement(etat, "decision", "systeme", f"Correctif propose pour validation: {description}")
+        emettre(etat, "decision", "systeme", f"Correctif propose pour validation: {description}")
         return etat
 
     def ecrire_memoire(etat: EtatEnquete):
@@ -298,7 +306,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
         )
         memoire.ecrire(enregistrement)
         etat["enregistrement"] = enregistrement
-        evenement(etat, "decision", "historien", "Resultat provisoire enregistre en memoire")
+        emettre(etat, "decision", "historien", "Resultat provisoire enregistre en memoire")
         return etat
 
     def orienter(etat: EtatEnquete) -> str:
@@ -328,6 +336,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
 def enqueter(
     contexte: ContexteIncident | dict, memoire: Memoire, llm: LLM, abstention: Abstention,
     resultat: Literal["reussi", "echoue"] = "reussi",
+    sur_evenement: Callable[[EvenementEnquete], None] | None = None,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
@@ -339,7 +348,7 @@ def enqueter(
     appels_avant = getattr(usage, "nb_appels", None)
     entree_avant = getattr(usage, "tokens_entree", None)
     sortie_avant = getattr(usage, "tokens_sortie", None)
-    etat = creer_graphe(memoire, llm, abstention).invoke({
+    etat = creer_graphe(memoire, llm, abstention, sur_evenement=sur_evenement).invoke({
         "contexte": contexte, "evenements": [], "hypotheses": [],
         "correctif": None, "enregistrement": None, "resultat_action": resultat,
         "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,

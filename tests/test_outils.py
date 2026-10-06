@@ -50,3 +50,45 @@ def test_outils_sans_indices():
     incident = contexte({"attendu": ["prix:float"], "observe": ["prix:float"]})
     for outil in (outils.tester_schema, outils.tester_ressources, outils.tester_reseau, outils.tester_configuration):
         assert outil(incident) == []
+
+
+def test_reseau_info_health_check_passed_ignore():
+    incident = contexte(logs=[{"template": "INFO connection health check passed", "compte": 1000}])
+    assert outils.tester_reseau(incident) == []
+
+
+def test_reseau_error_connection_refused():
+    template = "ERROR connection refused"
+    incident = contexte(logs=[{"template": template, "compte": outils.SEUIL_LOG_RESEAU + 1}])
+    preuves = outils.tester_reseau(incident)
+    assert len(preuves) == 1 and template in preuves[0]
+
+
+def test_ressources_recovered_ignore():
+    incident = contexte(logs=[{"template": "WARN memory recovered after GC", "compte": 1000}])
+    assert outils.tester_ressources(incident) == []
+
+
+def test_ressources_error_out_of_memory():
+    template = "ERROR out of memory"
+    incident = contexte(logs=[{"template": template, "compte": outils.SEUIL_LOG_RESSOURCES + 1}])
+    preuves = outils.tester_ressources(incident)
+    assert len(preuves) == 1 and template in preuves[0]
+
+
+@pytest.mark.parametrize("mot", ["passed", "healthy", "recovered", "succeeded", "ok"])
+@pytest.mark.parametrize("outil", [outils.tester_reseau, outils.tester_ressources])
+def test_etats_sains_exclus_meme_sous_error(outil, mot):
+    incident = contexte(logs=[{"template": f"ERROR memory connection {mot.upper()}", "compte": 1000}])
+    assert outil(incident) == []
+
+
+@pytest.mark.parametrize("outil", [outils.tester_reseau, outils.tester_ressources])
+def test_info_exclu_sans_mot_etat_sain(outil):
+    incident = contexte(logs=[{"template": "[INFO] memory connection sampling", "compte": 1000}])
+    assert outil(incident) == []
+
+
+def test_ok_ne_correspond_pas_a_une_sous_chaine():
+    incident = contexte(logs=[{"template": "ERROR connection broken", "compte": 1000}])
+    assert len(outils.tester_reseau(incident)) == 1
