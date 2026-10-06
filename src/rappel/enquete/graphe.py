@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -16,12 +17,22 @@ from . import outils
 
 
 @dataclass
+class MetriquesEnquete:
+    nb_evenements: int = 0
+    nb_hypotheses_testees: int = 0
+    nb_ecartees_par_memoire: int = 0
+    nb_appels_llm: int = 0
+    duree_ms: float = 0.0
+
+
+@dataclass
 class ResultatEnquete:
     hypotheses: list[Hypothese]
     evenements: list[EvenementEnquete]
     correctif: CorrectifPropose | None
     decision_abstention: DecisionAbstention
     enregistrement: EnregistrementMemoire | None
+    metriques: MetriquesEnquete
 
 
 class EtatEnquete(TypedDict, total=False):
@@ -36,6 +47,9 @@ class EtatEnquete(TypedDict, total=False):
     correctif: CorrectifPropose | None
     enregistrement: EnregistrementMemoire | None
     resultat_action: Literal["reussi", "echoue"]
+    nb_hypotheses_testees: int
+    nb_ecartees_par_memoire: int
+    nb_appels_llm: int
 
 
 def maintenant() -> str:
@@ -54,6 +68,12 @@ def preparer(etat: EtatEnquete) -> EtatEnquete:
     return {**etat, "evenements": list(etat.get("evenements", []))}
 
 
+def decrire_souvenir(souvenir: EnregistrementMemoire) -> str:
+    if souvenir.resultat == "reussi":
+        return f"incident similaire résolu par : {souvenir.correctif_essaye} (date : {souvenir.date})"
+    return f"échec du correctif déjà essayé : {souvenir.correctif_essaye} (date : {souvenir.date})"
+
+
 def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
     def charger_contexte(etat: EtatEnquete):
         etat = preparer(etat)
@@ -68,14 +88,12 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
         etat = preparer(etat)
         signature = etat["contexte"].signature
         souvenirs = memoire.chercher(signature)
-        fusionner = getattr(memoire, "hypotheses_refutees", None)
-        refutees = fusionner(signature) if callable(fusionner) else list(dict.fromkeys(
-            texte for souvenir in souvenirs for texte in souvenir.hypotheses_refutees
-        ))
+        refutees = memoire.hypotheses_refutees(signature)
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
-            texte = json.dumps([souvenir.model_dump() for souvenir in souvenirs], ensure_ascii=True)
+            texte = "; ".join(decrire_souvenir(souvenir) for souvenir in souvenirs)
+            texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
         evenement(etat, "preuve", "historien", texte)
         return etat
 
@@ -86,6 +104,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             'Retourne une liste JSON de {"texte": str, "categorie": str}. '
             'Categories autorisees: schema, ressources, reseau, configuration.'
         )
+        etat["nb_appels_llm"] = etat.get("nb_appels_llm", 0) + 1
         candidats = json.loads(llm.completer(prompt, role="detective"))
         categories_autorisees = {"schema", "ressources", "reseau", "configuration"}
         if not isinstance(candidats, list) or len(candidats) < 3:
@@ -100,6 +119,7 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             ):
                 raise ValueError("Candidat LLM invalide: texte et categorie autorisee requis")
             if candidat["texte"] in etat["refutees_connues"]:
+                etat["nb_ecartees_par_memoire"] = etat.get("nb_ecartees_par_memoire", 0) + 1
                 evenement(etat, "rejet", "historien", f"Deja refutee en memoire: {candidat['texte']}")
                 continue
             hypothese = Hypothese(
@@ -119,10 +139,10 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             "schema": outils.tester_schema, "ressources": outils.tester_ressources,
             "reseau": outils.tester_reseau, "configuration": outils.tester_configuration,
         }
-        preuves = {
-            hypothese.id: fonctions[etat["categories"][hypothese.id]](etat["contexte"])
-            for hypothese in etat["hypotheses"]
-        }
+        preuves = {}
+        for hypothese in etat["hypotheses"]:
+            preuves[hypothese.id] = fonctions[etat["categories"][hypothese.id]](etat["contexte"])
+            etat["nb_hypotheses_testees"] = etat.get("nb_hypotheses_testees", 0) + 1
         candidates = [hypothese for hypothese in etat["hypotheses"] if preuves[hypothese.id]]
         gagnante = max(candidates, key=lambda hypothese: len(preuves[hypothese.id]), default=None)
         hypotheses = []
@@ -198,6 +218,10 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
             description = f"Examiner et corriger {categorie} pour {composant} apres validation"
             patch = json.dumps({"composant": composant, "categorie": categorie, "preuves": retenue.preuves})
             justification = f"{retenue.texte}: {'; '.join(retenue.preuves)}"
+        if etat["souvenirs"]:
+            justification += "; " + "; ".join(
+                decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]
+            )
         correctif = CorrectifPropose(
             description=description, patch=patch, niveau_risque="validation", reversible=True,
             elements_touches=[composant], justification=justification,
@@ -252,14 +276,22 @@ def enqueter(
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
         raise ValueError("resultat doit etre reussi ou echoue")
+    debut = perf_counter()
     etat = creer_graphe(memoire, llm, abstention).invoke({
         "contexte": contexte, "evenements": [], "hypotheses": [],
         "correctif": None, "enregistrement": None, "resultat_action": resultat,
+        "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
     })
     return ResultatEnquete(
         hypotheses=etat["hypotheses"], evenements=etat["evenements"],
         correctif=etat["correctif"], decision_abstention=etat["decision_abstention"],
         enregistrement=etat["enregistrement"],
+        metriques=MetriquesEnquete(
+            nb_evenements=len(etat["evenements"]),
+            nb_hypotheses_testees=etat["nb_hypotheses_testees"],
+            nb_ecartees_par_memoire=etat["nb_ecartees_par_memoire"],
+            nb_appels_llm=etat["nb_appels_llm"], duree_ms=(perf_counter() - debut) * 1000,
+        ),
     )
 
 

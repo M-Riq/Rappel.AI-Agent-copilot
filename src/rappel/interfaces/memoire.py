@@ -10,6 +10,8 @@ class Memoire(Protocol):
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None: ...
 
+    def hypotheses_refutees(self, signature: str) -> list[str]: ...
+
 
 class MemoireJSON:
     def __init__(self, chemin: str | Path = "data/memoire.json") -> None:
