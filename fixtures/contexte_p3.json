@@ -1,0 +1,28 @@
+{
+  "incident_id": "inc-p3-0001",
+  "horodatage": "2026-10-17T14:05:00Z",
+  "signature": "latency_anomaly:orders_etl",
+  "logs": [
+    {"template": "WARN orders_etl: batch <*> processing time exceeded reference window", "compte": 16},
+    {"template": "INFO orders_etl: batch <*> completed successfully after <*> ms", "compte": 16},
+    {"template": "WARN worker: heartbeat delayed by <*> ms; next heartbeat on time", "compte": 3},
+    {"template": "WARN orders_etl: transient read timeout; retry completed successfully", "compte": 2},
+    {"template": "INFO orders_etl: schema validation passed for batch <*>", "compte": 16},
+    {"template": "INFO worker: CPU and memory samples within configured limits", "compte": 8},
+    {"template": "WARN telemetry: upstream timing sample unavailable for batch <*>", "compte": 5}
+  ],
+  "commits_recents": [],
+  "schema": {
+    "attendu": ["id:int", "amount:float"],
+    "observe": ["id:int", "amount:float"]
+  },
+  "metriques": {
+    "lignes_rejetees": 0,
+    "lignes_traitees": 10000,
+    "latence_ms": 48000,
+    "latence_reference_ms": 1500,
+    "latence_p95_ms": 62000,
+    "cpu_utilisation_pct": 43,
+    "memoire_utilisation_pct": 58
+  }
+}

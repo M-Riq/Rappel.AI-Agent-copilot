@@ -1,0 +1,61 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "incident_id": {
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "texte": {
+      "title": "Texte",
+      "type": "string"
+    },
+    "statut": {
+      "enum": [
+        "ouverte",
+        "retenue",
+        "refutee"
+      ],
+      "title": "Statut",
+      "type": "string"
+    },
+    "preuves": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Preuves",
+      "type": "array"
+    },
+    "confiance": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confiance",
+      "type": "number"
+    },
+    "raison_rejet": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Raison Rejet"
+    }
+  },
+  "required": [
+    "id",
+    "incident_id",
+    "texte",
+    "statut",
+    "preuves",
+    "confiance",
+    "raison_rejet"
+  ],
+  "title": "Hypothese",
+  "type": "object"
+}

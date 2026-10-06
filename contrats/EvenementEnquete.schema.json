@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "incident_id": {
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "etape": {
+      "minimum": 1,
+      "title": "Etape",
+      "type": "integer"
+    },
+    "type": {
+      "enum": [
+        "hypothese",
+        "preuve",
+        "rejet",
+        "debat",
+        "decision",
+        "abstention"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "acteur": {
+      "enum": [
+        "detective",
+        "sceptique",
+        "historien",
+        "systeme"
+      ],
+      "title": "Acteur",
+      "type": "string"
+    },
+    "texte": {
+      "title": "Texte",
+      "type": "string"
+    },
+    "horodatage": {
+      "title": "Horodatage",
+      "type": "string"
+    }
+  },
+  "required": [
+    "incident_id",
+    "etape",
+    "type",
+    "acteur",
+    "texte",
+    "horodatage"
+  ],
+  "title": "EvenementEnquete",
+  "type": "object"
+}

@@ -1,0 +1,54 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "patch": {
+      "title": "Patch",
+      "type": "string"
+    },
+    "niveau_risque": {
+      "enum": [
+        "auto",
+        "validation",
+        "refus"
+      ],
+      "title": "Niveau Risque",
+      "type": "string"
+    },
+    "elements_touches": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Elements Touches",
+      "type": "array"
+    },
+    "reversible": {
+      "title": "Reversible",
+      "type": "boolean"
+    },
+    "justification": {
+      "title": "Justification",
+      "type": "string"
+    },
+    "confiance": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confiance",
+      "type": "number"
+    }
+  },
+  "required": [
+    "description",
+    "patch",
+    "niveau_risque",
+    "elements_touches",
+    "reversible",
+    "justification",
+    "confiance"
+  ],
+  "title": "CorrectifPropose",
+  "type": "object"
+}

@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    },
+    "cause_confirmee": {
+      "title": "Cause Confirmee",
+      "type": "string"
+    },
+    "hypotheses_refutees": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Hypotheses Refutees",
+      "type": "array"
+    },
+    "correctif_essaye": {
+      "title": "Correctif Essaye",
+      "type": "string"
+    },
+    "resultat": {
+      "enum": [
+        "reussi",
+        "echoue"
+      ],
+      "title": "Resultat",
+      "type": "string"
+    },
+    "date": {
+      "title": "Date",
+      "type": "string"
+    }
+  },
+  "required": [
+    "signature",
+    "cause_confirmee",
+    "hypotheses_refutees",
+    "correctif_essaye",
+    "resultat",
+    "date"
+  ],
+  "title": "EnregistrementMemoire",
+  "type": "object"
+}

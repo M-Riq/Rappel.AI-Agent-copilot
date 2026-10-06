@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "CommitRecent": {
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "title": "Hash",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "date": {
+          "title": "Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hash",
+        "message",
+        "date"
+      ],
+      "title": "CommitRecent",
+      "type": "object"
+    },
+    "EntreeLog": {
+      "additionalProperties": false,
+      "properties": {
+        "template": {
+          "title": "Template",
+          "type": "string"
+        },
+        "compte": {
+          "minimum": 0,
+          "title": "Compte",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "template",
+        "compte"
+      ],
+      "title": "EntreeLog",
+      "type": "object"
+    },
+    "SchemaIncident": {
+      "additionalProperties": false,
+      "properties": {
+        "attendu": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attendu",
+          "type": "array"
+        },
+        "observe": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Observe",
+          "type": "array"
+        }
+      },
+      "required": [
+        "attendu",
+        "observe"
+      ],
+      "title": "SchemaIncident",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "incident_id": {
+      "title": "Incident Id",
+      "type": "string"
+    },
+    "horodatage": {
+      "format": "date-time",
+      "title": "Horodatage",
+      "type": "string"
+    },
+    "signature": {
+      "title": "Signature",
+      "type": "string"
+    },
+    "logs": {
+      "items": {
+        "$ref": "#/$defs/EntreeLog"
+      },
+      "title": "Logs",
+      "type": "array"
+    },
+    "commits_recents": {
+      "items": {
+        "$ref": "#/$defs/CommitRecent"
+      },
+      "title": "Commits Recents",
+      "type": "array"
+    },
+    "schema": {
+      "$ref": "#/$defs/SchemaIncident"
+    },
+    "metriques": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Metriques",
+      "type": "object"
+    }
+  },
+  "required": [
+    "incident_id",
+    "horodatage",
+    "signature",
+    "logs",
+    "commits_recents",
+    "schema",
+    "metriques"
+  ],
+  "title": "ContexteIncident",
+  "type": "object"
+}

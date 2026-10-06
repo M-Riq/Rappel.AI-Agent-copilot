@@ -1,0 +1,29 @@
+{
+  "incident_id": "inc-p1-0001",
+  "horodatage": "2026-10-15T10:42:00Z",
+  "signature": "schema_mismatch:orders_etl",
+  "logs": [
+    {"template": "KeyError: column <*> not found", "compte": 12480},
+    {"template": "ERROR orders_etl: required column amount missing from input batch <*>", "compte": 24},
+    {"template": "ERROR orders_etl: batch <*> rejected by schema validation", "compte": 24},
+    {"template": "INFO orders_etl: input columns detected: id,total", "compte": 24},
+    {"template": "WARN metrics_exporter: scrape timeout after <*> ms; retry succeeded", "compte": 3},
+    {"template": "WARN worker: memory usage above soft threshold <*> percent; recovered after GC", "compte": 2},
+    {"template": "INFO orders_etl: source connection health check passed", "compte": 12}
+  ],
+  "commits_recents": [
+    {"hash": "a1b2c3d", "message": "orders_etl: rename output column amount to total", "date": "2026-10-15T10:15:00Z"},
+    {"hash": "e4f5a6b", "message": "docs: update pipeline owner contact", "date": "2026-10-14T16:30:00Z"}
+  ],
+  "schema": {
+    "attendu": ["id:int", "amount:float"],
+    "observe": ["id:int", "total:float"]
+  },
+  "metriques": {
+    "lignes_rejetees": 12480,
+    "lignes_traitees": 0,
+    "lots_rejetes": 24,
+    "latence_ms": 1800,
+    "latence_reference_ms": 1500
+  }
+}

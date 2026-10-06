@@ -1,0 +1,28 @@
+{
+  "incident_id": "inc-p2-0001",
+  "horodatage": "2026-10-16T08:20:00Z",
+  "signature": "schema_mismatch:orders_etl",
+  "logs": [
+    {"template": "ERROR orders_etl: column created_at type mismatch: expected date, observed text", "compte": 8640},
+    {"template": "ERROR orders_etl: cannot cast created_at value <*> to date using format YYYY-MM-DD", "compte": 8640},
+    {"template": "WARN orders_etl: batch <*> quarantined after type validation failure", "compte": 18},
+    {"template": "INFO orders_etl: input columns detected: id,created_at", "compte": 18},
+    {"template": "INFO orders_etl: source connection established in <*> ms", "compte": 1},
+    {"template": "WARN telemetry: buffered <*> events during collector restart", "compte": 2}
+  ],
+  "commits_recents": [
+    {"hash": "b7c8d9e", "message": "orders source: serialize created_at date as localized text (DD/MM/YYYY)", "date": "2026-10-16T07:55:00Z"},
+    {"hash": "f0a1b2c", "message": "tests: refresh order identifier samples", "date": "2026-10-15T15:10:00Z"}
+  ],
+  "schema": {
+    "attendu": ["id:int", "created_at:date"],
+    "observe": ["id:int", "created_at:str"]
+  },
+  "metriques": {
+    "lignes_rejetees": 8640,
+    "lignes_traitees": 1360,
+    "lots_rejetes": 18,
+    "latence_ms": 2100,
+    "latence_reference_ms": 1500
+  }
+}
