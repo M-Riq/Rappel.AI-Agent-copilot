@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Protocol
@@ -13,8 +14,14 @@ class LLM(Protocol):
 
 class LLMFaux:
     def completer(self, prompt: str, role: str = "detective") -> str:
+        if role == "detective":
+            return json.dumps([
+                {"texte": "Le schema des donnees a change", "categorie": "schema"},
+                {"texte": "Saturation des ressources", "categorie": "ressources"},
+                {"texte": "Probleme reseau ou timeout", "categorie": "reseau"},
+                {"texte": "Changement de configuration", "categorie": "configuration"},
+            ])
         textes = {
-            "detective": "Un changement de schema pourrait expliquer l'incident",
             "sceptique": "Verifier si les preuves distinguent plusieurs causes possibles",
             "historien": "Comparer l'incident aux causes confirmees en memoire",
         }

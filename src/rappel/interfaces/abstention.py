@@ -24,7 +24,7 @@ class AbstentionSeuil:
     def decider(
         self, hypothese: Hypothese, nb_sources: int, incident_similaire: bool
     ) -> DecisionAbstention:
-        # Formule provisoire, a calibrer sur P1/P2/P3.
+        # Formule provisoire, a calibrer sur les fixtures d'incident.
         confiance = hypothese.confiance
         if nb_sources >= 2:
             confiance += 0.1

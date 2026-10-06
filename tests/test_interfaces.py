@@ -64,8 +64,16 @@ def test_memoire_chemin_par_defaut(tmp_path, monkeypatch):
 def test_llm_faux_reponse_json(role):
     llm = LLMFaux()
     reponse = llm.completer("Examiner cet incident", role)
-    assert isinstance(json.loads(reponse), dict)
-    assert Hypothese.model_validate_json(reponse).id == f"hyp-faux-{role}"
+    if role == "detective":
+        candidats = json.loads(reponse)
+        assert isinstance(candidats, list) and len(candidats) >= 3
+        assert {candidat["categorie"] for candidat in candidats} == {
+            "schema", "ressources", "reseau", "configuration"
+        }
+        assert all(set(candidat) == {"texte", "categorie"} for candidat in candidats)
+    else:
+        assert isinstance(json.loads(reponse), dict)
+        assert Hypothese.model_validate_json(reponse).id == f"hyp-faux-{role}"
     assert llm.completer("Autre prompt", role) == reponse
 
 
