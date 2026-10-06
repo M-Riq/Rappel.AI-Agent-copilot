@@ -1,0 +1,11 @@
+{
+  "description": "Restaurer le schema attendu de orders_etl: id:int, amount:float",
+  "patch": "{\n  \"composant\": \"orders_etl\",\n  \"avant\": [\n    \"id:int\",\n    \"total:float\"\n  ],\n  \"apres\": [\n    \"id:int\",\n    \"amount:float\"\n  ]\n}",
+  "niveau_risque": "validation",
+  "elements_touches": [
+    "orders_etl"
+  ],
+  "reversible": true,
+  "justification": "colonne renommee probable: schema: colonne manquante amount:float; schema: nouvelle colonne total:float",
+  "confiance": 1.0
+}
