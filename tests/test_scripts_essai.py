@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import essai_detective, essai_war_room
+from scripts import essai_detective, essai_llm, essai_war_room
 from src.rappel.contrats import ContexteIncident
 from src.rappel.interfaces.llm import LLMFaux
 
@@ -58,7 +58,7 @@ def test_comparaison_war_room_faux(capsys):
     assert "Brut" not in sortie
 
 
-@pytest.mark.parametrize("script", [essai_detective, essai_war_room])
+@pytest.mark.parametrize("script", [essai_detective, essai_war_room, essai_llm])
 def test_refus_fournisseur_reel_sans_confirmation(script, monkeypatch, capsys):
     monkeypatch.setenv("LLM_PROVIDER", "nvidia")
     appels = []
@@ -69,7 +69,7 @@ def test_refus_fournisseur_reel_sans_confirmation(script, monkeypatch, capsys):
     assert "Appels prevus" in sortie and "Limite de depense" in sortie
 
 
-@pytest.mark.parametrize("script", [essai_detective, essai_war_room])
+@pytest.mark.parametrize("script", [essai_detective, essai_war_room, essai_llm])
 def test_secours_reel_exige_confirmation(script, monkeypatch):
     monkeypatch.setenv("LLM_FALLBACK", "claude")
     assert script.main([], fabrique_llm=lambda: pytest.fail("Ne doit pas construire le fournisseur")) == 2
@@ -145,4 +145,33 @@ def test_exception_ne_divulgue_pas_secret(script, monkeypatch, capsys):
     def echouer():
         raise RuntimeError(secret)
     assert script.main(["--fixture", str(fixture)], fabrique_llm=echouer) == 1
+    assert secret not in capsys.readouterr().out
+
+
+def test_connexion_faux_sans_confirmation(capsys):
+    llm = LLMFaux()
+    assert essai_llm.main([], fabrique_llm=lambda: llm) == 0
+    assert llm.usage.nb_appels == 1
+    sortie = capsys.readouterr().out
+    assert "Fournisseur : faux" in sortie
+    assert "Appels prevus" in sortie
+
+
+def test_connexion_reelle_confirmee_simulee(monkeypatch, capsys):
+    secret = "cle-factice-connexion"
+    monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+    monkeypatch.setenv("NVIDIA_API_KEY", secret)
+    llm = LLMFaux()
+    llm.modele = secret
+    assert essai_llm.main(["--confirmer"], fabrique_llm=lambda: llm) == 0
+    assert llm.usage.nb_appels == 1
+    assert secret not in capsys.readouterr().out
+
+
+def test_connexion_exception_sans_secret(monkeypatch, capsys):
+    secret = "secret-factice-connexion"
+    monkeypatch.setenv("NVIDIA_API_KEY", secret)
+    def echouer():
+        raise RuntimeError(secret)
+    assert essai_llm.main([], fabrique_llm=echouer) == 1
     assert secret not in capsys.readouterr().out
