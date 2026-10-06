@@ -4,7 +4,7 @@ import pytest
 
 from src.rappel.contrats import EnregistrementMemoire, Hypothese
 from src.rappel.interfaces.abstention import AbstentionSeuil
-from src.rappel.interfaces.llm import LLMFaux, creer_llm
+from src.rappel.interfaces.llm import LLMClaude, LLMFaux, LLMNvidia, creer_llm
 from src.rappel.interfaces.memoire import MemoireJSON
 
 
@@ -87,12 +87,17 @@ def test_creer_llm_par_defaut(tmp_path, monkeypatch):
     assert isinstance(creer_llm(), LLMFaux)
 
 
-@pytest.mark.parametrize("fournisseur", ["nvidia", "claude"])
-def test_creer_llm_fournisseur_non_implemente(tmp_path, monkeypatch, fournisseur):
+@pytest.mark.parametrize(
+    ("fournisseur", "cle_env", "modele_env", "classe"),
+    [("nvidia", "NVIDIA_API_KEY", "NVIDIA_MODEL", LLMNvidia),
+     ("claude", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", LLMClaude)],
+)
+def test_creer_llm_fournisseur(tmp_path, monkeypatch, fournisseur, cle_env, modele_env, classe):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LLM_PROVIDER", fournisseur)
-    with pytest.raises(NotImplementedError, match="à brancher plus tard"):
-        creer_llm()
+    monkeypatch.setenv(cle_env, "cle-factice")
+    monkeypatch.setenv(modele_env, "modele-factice")
+    assert isinstance(creer_llm(), classe)
 
 
 def test_creer_llm_lit_dotenv(tmp_path, monkeypatch):
@@ -100,7 +105,9 @@ def test_creer_llm_lit_dotenv(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "faux")
     monkeypatch.delenv("LLM_PROVIDER")
     (tmp_path / ".env").write_text("LLM_PROVIDER=nvidia\n", encoding="utf-8")
-    with pytest.raises(NotImplementedError):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("NVIDIA_MODEL", raising=False)
+    with pytest.raises(ValueError, match="NVIDIA_API_KEY manquante"):
         creer_llm()
 
 

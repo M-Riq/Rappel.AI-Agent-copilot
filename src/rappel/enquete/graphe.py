@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError
 
 from ..contrats import (
     ContexteIncident, CorrectifPropose, EnregistrementMemoire, EvenementEnquete, Hypothese,
@@ -23,6 +24,18 @@ class MetriquesEnquete:
     nb_ecartees_par_memoire: int = 0
     nb_appels_llm: int = 0
     duree_ms: float = 0.0
+    nb_tokens_entree: int | None = None
+    nb_tokens_sortie: int | None = None
+
+
+class CandidatDetective(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    texte: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    categorie: Literal["schema", "ressources", "reseau", "configuration"]
+
+
+ADAPTATEUR_CANDIDATS = TypeAdapter(Annotated[list[CandidatDetective], Field(min_length=3)])
 
 
 @dataclass
@@ -50,6 +63,7 @@ class EtatEnquete(TypedDict, total=False):
     nb_hypotheses_testees: int
     nb_ecartees_par_memoire: int
     nb_appels_llm: int
+    erreur_llm: str | None
 
 
 def maintenant() -> str:
@@ -72,6 +86,43 @@ def decrire_souvenir(souvenir: EnregistrementMemoire) -> str:
     if souvenir.resultat == "reussi":
         return f"incident similaire résolu par : {souvenir.correctif_essaye} (date : {souvenir.date})"
     return f"échec du correctif déjà essayé : {souvenir.correctif_essaye} (date : {souvenir.date})"
+
+
+def extraire_json(texte: str) -> str:
+    contenu = texte.strip()
+    if contenu.startswith("```"):
+        lignes = contenu.splitlines()
+        if lignes and lignes[-1].strip().startswith("```"):
+            contenu = "\n".join(lignes[1:-1])
+    decodeur = json.JSONDecoder()
+    for index, caractere in enumerate(contenu):
+        if caractere == "[":
+            try:
+                valeur, _ = decodeur.raw_decode(contenu[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(valeur, list):
+                return json.dumps(valeur, ensure_ascii=True)
+    raise ValueError("Aucune liste JSON dans la réponse")
+
+
+def construire_prompt(contexte: ContexteIncident) -> str:
+    resume = {
+        "signature": contexte.signature,
+        "logs": [{"template": log.template, "compte": log.compte} for log in contexte.logs],
+        "ecart_schema": outils.ecarts_schema(contexte),
+        "commits_recents": [
+            {"hash": commit.hash, "message": commit.message, "date": commit.date}
+            for commit in contexte.commits_recents
+        ],
+    }
+    return (
+        "Role: detective. Analyse les indices sans décider du diagnostic : seuls les outils le font. "
+        "Propose au moins trois candidats génériques indépendants du contexte. Retourne UNIQUEMENT "
+        "un tableau JSON d'objets {\"texte\": string, \"categorie\": string}; categorie doit être "
+        "schema, ressources, reseau ou configuration. Ne propose ni conclusion ni correctif.\n"
+        f"Résumé du contexte:\n{json.dumps(resume, ensure_ascii=False, indent=2)}"
+    )
 
 
 def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
@@ -99,36 +150,38 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
 
     def generer_hypotheses(etat: EtatEnquete):
         etat = preparer(etat)
-        prompt = (
-            'Propose au moins trois candidats generiques independants du contexte. '
-            'Retourne une liste JSON de {"texte": str, "categorie": str}. '
-            'Categories autorisees: schema, ressources, reseau, configuration.'
-        )
-        etat["nb_appels_llm"] = etat.get("nb_appels_llm", 0) + 1
-        candidats = json.loads(llm.completer(prompt, role="detective"))
-        categories_autorisees = {"schema", "ressources", "reseau", "configuration"}
-        if not isinstance(candidats, list) or len(candidats) < 3:
-            raise ValueError("Le LLM doit proposer une liste d'au moins trois candidats")
+        prompt = construire_prompt(etat["contexte"])
+        candidats = None
+        for tentative in range(2):
+            etat["nb_appels_llm"] = etat.get("nb_appels_llm", 0) + 1
+            try:
+                reponse = llm.completer(prompt, role="detective")
+                if not isinstance(reponse, str):
+                    raise ValueError("La réponse du détective doit être du texte")
+                candidats = ADAPTATEUR_CANDIDATS.validate_json(extraire_json(reponse))
+                break
+            except (ValueError, ValidationError, TypeError, AttributeError):
+                if tentative == 0:
+                    prompt += "\nLa réponse précédente était invalide. Réessaie avec uniquement une liste JSON valide d'au moins trois candidats."
+        if candidats is None:
+            etat["erreur_llm"] = "Réponse du détective invalide après une nouvelle tentative"
+            etat.update(hypotheses=[], categories={})
+            evenement(etat, "abstention", "systeme", "aucune hypothese valide : réponse LLM invalide")
+            return etat
         hypotheses = []
         categories = {}
         for indice, candidat in enumerate(candidats, start=1):
-            if (
-                not isinstance(candidat, dict) or set(candidat) != {"texte", "categorie"}
-                or not isinstance(candidat["texte"], str) or not candidat["texte"].strip()
-                or candidat["categorie"] not in categories_autorisees
-            ):
-                raise ValueError("Candidat LLM invalide: texte et categorie autorisee requis")
-            if candidat["texte"] in etat["refutees_connues"]:
+            if candidat.texte in etat["refutees_connues"]:
                 etat["nb_ecartees_par_memoire"] = etat.get("nb_ecartees_par_memoire", 0) + 1
-                evenement(etat, "rejet", "historien", f"Deja refutee en memoire: {candidat['texte']}")
+                evenement(etat, "rejet", "historien", f"Deja refutee en memoire: {candidat.texte}")
                 continue
             hypothese = Hypothese(
                 id=f"{etat['contexte'].incident_id}:hyp-{indice}",
-                incident_id=etat["contexte"].incident_id, texte=candidat["texte"],
+                incident_id=etat["contexte"].incident_id, texte=candidat.texte,
                 statut="ouverte", preuves=[], confiance=0.0, raison_rejet=None,
             )
             hypotheses.append(hypothese)
-            categories[hypothese.id] = candidat["categorie"]
+            categories[hypothese.id] = candidat.categorie
             evenement(etat, "hypothese", "detective", hypothese.texte)
         etat.update(hypotheses=hypotheses, categories=categories)
         return etat
@@ -172,7 +225,10 @@ def creer_graphe(memoire: Memoire, llm: LLM, abstention: Abstention):
         etat = preparer(etat)
         retenue = etat["retenue"]
         if retenue is None:
-            decision = DecisionAbstention(True, 0.0, ["hypothese etayee par une preuve"])
+            manque = ["aucune cause identifiée"]
+            if etat.get("erreur_llm"):
+                manque.append("candidats JSON invalides après nouvelle tentative")
+            decision = DecisionAbstention(True, 0.0, manque)
         else:
             sources = {preuve.partition(":")[0] for preuve in retenue.preuves}
             decision = abstention.decider(
@@ -277,11 +333,28 @@ def enqueter(
     if resultat not in {"reussi", "echoue"}:
         raise ValueError("resultat doit etre reussi ou echoue")
     debut = perf_counter()
+    if hasattr(llm, "debut_execution"):
+        llm.debut_execution()
+    usage = getattr(llm, "usage", None)
+    appels_avant = getattr(usage, "nb_appels", None)
+    entree_avant = getattr(usage, "tokens_entree", None)
+    sortie_avant = getattr(usage, "tokens_sortie", None)
     etat = creer_graphe(memoire, llm, abstention).invoke({
         "contexte": contexte, "evenements": [], "hypotheses": [],
         "correctif": None, "enregistrement": None, "resultat_action": resultat,
         "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
+        "erreur_llm": None,
     })
+    usage_final = getattr(llm, "usage", None)
+    entree_final = getattr(usage_final, "tokens_entree", None)
+    sortie_final = getattr(usage_final, "tokens_sortie", None)
+    appels_final = getattr(usage_final, "nb_appels", None)
+
+    def difference(avant, apres):
+        if apres is None:
+            return None
+        return apres if avant is None else apres - avant
+
     return ResultatEnquete(
         hypotheses=etat["hypotheses"], evenements=etat["evenements"],
         correctif=etat["correctif"], decision_abstention=etat["decision_abstention"],
@@ -290,7 +363,12 @@ def enqueter(
             nb_evenements=len(etat["evenements"]),
             nb_hypotheses_testees=etat["nb_hypotheses_testees"],
             nb_ecartees_par_memoire=etat["nb_ecartees_par_memoire"],
-            nb_appels_llm=etat["nb_appels_llm"], duree_ms=(perf_counter() - debut) * 1000,
+            nb_appels_llm=(difference(appels_avant, appels_final)
+                           if appels_avant is not None and appels_final is not None
+                           else etat["nb_appels_llm"]),
+            duree_ms=(perf_counter() - debut) * 1000,
+            nb_tokens_entree=difference(entree_avant, entree_final),
+            nb_tokens_sortie=difference(sortie_avant, sortie_final),
         ),
     )
 
