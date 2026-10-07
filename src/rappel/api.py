@@ -6,7 +6,7 @@ from typing import Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool, field_validator
 
 from .contrats import ContexteIncident, CorrectifPropose, EvenementEnquete
 from .enquete import enqueter
@@ -24,6 +24,19 @@ class DecisionHumaine(BaseModel):
 class ResultatAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     resultat: Literal["reussi", "echoue"]
+
+
+class ReinitialisationMemoire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmer: StrictBool
+    incidents: StrictBool = False
+
+    @field_validator("confirmer")
+    @classmethod
+    def confirmation_obligatoire(cls, valeur: bool) -> bool:
+        if not valeur:
+            raise ValueError("confirmer doit etre true pour effacer la memoire")
+        return valeur
 
 
 def creer_app(
@@ -95,6 +108,7 @@ def creer_app(
             incidents[contexte.incident_id] = {
                 "contexte": contexte, "statut": "en_cours", "evenements": [],
                 "resultat": None, "decision": None,
+                "cree_le": datetime.now(timezone.utc).isoformat(), "resultat_action": None,
             }
         try:
             soumettre(lambda: executer(contexte))
@@ -104,6 +118,63 @@ def creer_app(
                 incident["statut"] = "erreur"
                 incident["message"] = "Impossible de demarrer l'enquete."
         return {"incident_id": contexte.incident_id, "statut": "en_cours"}
+
+    @application.get("/incidents")
+    def lister_incidents(
+        limite: int = Query(default=50, ge=1, le=200),
+        statut: Literal["en_cours", "termine", "erreur"] | None = None,
+    ):
+        with verrou:
+            resumes = []
+            for incident_id, incident in reversed(list(incidents.items())):
+                if statut is not None and incident["statut"] != statut:
+                    continue
+                resultat = incident["resultat"]
+                resumes.append({
+                    "incident_id": incident_id, "signature": incident["contexte"].signature,
+                    "statut": incident["statut"], "cree_le": incident["cree_le"],
+                    "nb_evenements": len(incident["evenements"]),
+                    "a_correctif": resultat is not None and resultat.correctif is not None,
+                    "abstention": resultat.decision_abstention.abstient if incident["statut"] == "termine" else None,
+                    "decision_humaine": incident["decision"], "resultat_action": incident["resultat_action"],
+                })
+                if len(resumes) == limite:
+                    break
+            return resumes
+
+    @application.get("/memoire")
+    def lire_memoire(signature: str | None = None):
+        try:
+            with verrou_execution:
+                souvenirs = memoire.lister() if signature is None else memoire.chercher(signature)
+                refutations = {}
+                for souvenir in souvenirs:
+                    textes = refutations.setdefault(souvenir.signature, [])
+                    for texte in souvenir.hypotheses_refutees:
+                        if texte not in textes:
+                            textes.append(texte)
+                return jsonable_encoder({"souvenirs": souvenirs, "refutations_par_signature": refutations})
+        except Exception:
+            raise HTTPException(500, "Lecture de la memoire impossible") from None
+
+    @application.post("/memoire/reinitialiser")
+    def reinitialiser_memoire(corps: ReinitialisationMemoire):
+        def verifier_en_cours():
+            if any(incident["statut"] == "en_cours" for incident in incidents.values()):
+                raise HTTPException(409, "Reinitialisation interdite pendant une enquete")
+        with verrou:
+            verifier_en_cours()
+        with verrou_execution:
+            with verrou:
+                verifier_en_cours()
+                try:
+                    nombre = memoire.vider()
+                except Exception:
+                    raise HTTPException(500, "Reinitialisation de la memoire impossible") from None
+                incidents_supprimes = len(incidents) if corps.incidents else 0
+                if corps.incidents:
+                    incidents.clear()
+                return {"souvenirs_supprimes": nombre, "incidents_supprimes": incidents_supprimes}
 
     @application.get("/incidents/{incident_id}")
     def lire_incident(incident_id: str):
@@ -162,11 +233,15 @@ def creer_app(
             signature = incident["contexte"].signature
         try:
             with verrou_execution:
-                mise_a_jour = memoire.mettre_a_jour_resultat(signature, corps.resultat)
+                with verrou:
+                    incident = obtenir(incident_id)
+                    mise_a_jour = memoire.mettre_a_jour_resultat(signature, corps.resultat)
+                    incident["resultat_action"] = corps.resultat
+                    ajouter_decision(incident, f"Resultat Action : {corps.resultat}; memoire mise a jour={mise_a_jour}")
+        except HTTPException:
+            raise
         except Exception:
             raise HTTPException(500, "Mise a jour de la memoire impossible") from None
-        with verrou:
-            ajouter_decision(obtenir(incident_id), f"Resultat Action : {corps.resultat}; memoire mise a jour={mise_a_jour}")
         return {"incident_id": incident_id, "resultat": corps.resultat, "memoire_mise_a_jour": mise_a_jour}
 
     return application

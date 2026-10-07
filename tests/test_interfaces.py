@@ -60,6 +60,18 @@ def test_memoire_chemin_par_defaut(tmp_path, monkeypatch):
     assert memoire.chercher("signature_inconnue") == []
 
 
+def test_memoire_lister_et_vider(tmp_path, enregistrement):
+    memoire = MemoireJSON(tmp_path / "memoire.json")
+    assert memoire.lister() == [] and memoire.vider() == 0
+    autre = enregistrement.model_copy(update={"signature": "autre"})
+    memoire.ecrire(enregistrement)
+    memoire.ecrire(autre)
+    assert memoire.lister() == [enregistrement, autre]
+    assert memoire.vider() == 2
+    assert MemoireJSON(memoire.chemin).lister() == []
+    assert memoire.chercher(enregistrement.signature) == []
+
+
 def test_memoire_mettre_a_jour_dernier_resultat(tmp_path, enregistrement):
     memoire = MemoireJSON(tmp_path / "memoire.json")
     memoire.ecrire(enregistrement)

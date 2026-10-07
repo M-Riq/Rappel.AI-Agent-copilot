@@ -6,6 +6,10 @@ from ..contrats import EnregistrementMemoire
 
 
 class Memoire(Protocol):
+    def lister(self) -> list[EnregistrementMemoire]: ...
+
+    def vider(self) -> int: ...
+
     def chercher(self, signature: str) -> list[EnregistrementMemoire]: ...
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None: ...
@@ -36,6 +40,14 @@ class MemoireJSON:
             for enregistrement in self._lire()
             if enregistrement.signature == signature
         ]
+
+    def lister(self) -> list[EnregistrementMemoire]:
+        return self._lire()
+
+    def vider(self) -> int:
+        nombre = len(self._lire())
+        self.chemin.write_text("[]\n", encoding="utf-8")
+        return nombre
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         enregistrements = self._lire()

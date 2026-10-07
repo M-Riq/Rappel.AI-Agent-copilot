@@ -134,8 +134,15 @@ P3 en utilise une autre vide. Code `0` si P1/P2 concluent et P3 s'abstient sans
 correctif, sinon `1`. Sans `--war-room`, le debat est explicitement desactive,
 meme si l'environnement l'active.
 API interactive : http://127.0.0.1:8000/docs ; aussi `/redoc` et `/openapi.json`.
-Voir [api.md](api.md) pour les six routes, les corps et les reponses.
+Voir [api.md](api.md) pour les routes, les corps et les reponses.
 L'identifiant des routes de correctif est aussi l'identifiant d'incident.
+`GET /incidents` liste les resumes recents (limite 50, maximum 200, filtre statut)
+sans logs ni textes d'evenements, avec dates de reception et decisions Action.
+`GET /memoire` expose les souvenirs et refutations dedoublonnees, avec filtre exact
+de signature : ces textes sont potentiellement sensibles, usage local seulement.
+`POST /memoire/reinitialiser` efface les souvenirs avec `confirmer=true` strict ;
+`incidents=true` efface aussi la session. Route destructive sans authentification,
+refusee si une enquete est en cours, meme encore en file.
 
 Essais manuels utilisant les fournisseurs configures dans `.env` :
 
@@ -195,7 +202,7 @@ L'URL Anthropic et `anthropic-version=2023-06-01` sont constantes de l'adaptateu
 
 ### Memoire, par exemple un futur adaptateur Meterless
 
-Le Protocol de [memoire.py](../src/rappel/interfaces/memoire.py) a les quatre
+Le Protocol de [memoire.py](../src/rappel/interfaces/memoire.py) a les six
 methodes ci-dessous. Signature et textes refutes se comparent exactement.
 La mise a jour cible le dernier souvenir de la signature et retourne `False`
 s'il n'existe pas. Meterless n'est pas integre : ce squelette ne suppose aucune
@@ -211,6 +218,12 @@ class MemoireExterne:
 
     def chercher(self, signature: str) -> list[EnregistrementMemoire]:
         raise NotImplementedError("Lecture et validation Pydantic a implementer")
+
+    def lister(self) -> list[EnregistrementMemoire]:
+      raise NotImplementedError("Tous les souvenirs dans l'ordre d'ecriture")
+
+    def vider(self) -> int:
+      raise NotImplementedError("Effacer tous les souvenirs et retourner leur nombre")
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         raise NotImplementedError("Persistance a implementer")
@@ -231,6 +244,9 @@ class MemoireExterne:
 valide a la lecture, ajoute des souvenirs et fusionne les refutations sans doublon
 en gardant l'ordre. `src/rappel/memoire/__init__.py` est vide : l'implementation
 actuelle est dans `interfaces/memoire.py`.
+`lister()` valide et renvoie tous les souvenirs dans l'ordre d'ecriture ; `vider()`
+valide le fichier puis ecrit une liste vide et renvoie le nombre supprime.
+L'API appelle ces methodes obligatoires sans detection optionnelle de leur presence.
 
 ### Fournisseur LLM
 

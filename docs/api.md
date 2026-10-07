@@ -28,6 +28,111 @@ Les enquetes sont executees dans un thread unique pour isoler les budgets LLM et
 les ecritures de memoire partagees ; plusieurs soumissions sont mises en file.
 Le statut `en_cours` couvre aussi cette attente. Les lectures restent accessibles.
 
+## Tableau des routes
+
+| Methode | Route | Role |
+|---|---|---|
+| POST | `/incidents` | Soumettre une enquete |
+| GET | `/incidents` | Resumes de session, sans contexte ni textes |
+| GET | `/incidents/{id}` | Resultat d'une enquete |
+| GET | `/incidents/{id}/evenements` | Lecture progressive |
+| POST | `/correctifs/{id}/decision` | Decision humaine |
+| POST | `/incidents/{id}/resultat-action` | Retour Action |
+| GET | `/memoire` | Souvenirs et refutations |
+| POST | `/memoire/reinitialiser` | Effacement destructif confirme |
+| GET | `/sante` | Sante de l'API |
+
+## GET /incidents
+
+Reponse **200** : liste vide `[]` au depart, sinon resumes dans l'ordre inverse
+de creation dans la session (le dernier soumis d'abord, meme en cas de dates egales).
+`cree_le` est la date UTC ISO de reception, pas l'horodatage du contexte.
+`limite` vaut 50, entre 1 et 200 ; `statut` est facultatif et accepte seulement
+`en_cours`, `termine`, `erreur`. Parametre invalide : **422**. Le filtre precede la limite.
+
+```json
+[
+  {
+    "incident_id": "inc-demo",
+    "signature": "schema_mismatch:pipeline_demo",
+    "statut": "termine",
+    "cree_le": "2026-10-07T10:00:00+00:00",
+    "nb_evenements": 13,
+    "a_correctif": true,
+    "abstention": false,
+    "decision_humaine": null,
+    "resultat_action": null
+  }
+]
+```
+
+`abstention` vaut `null` avant la fin ou en erreur. `resultat_action` reste `null`
+jusqu'au retour Action, sans recopier le resultat provisoire de la memoire.
+Les decisions humaines et retours Action augmentent `nb_evenements` et mettent
+a jour leurs champs. Aucun log, commit, contexte brut ou texte d'evenement dans
+ces resumes. Exemple filtre : `GET /incidents?limite=10&statut=termine`.
+
+## GET /memoire
+
+**Usage local uniquement : cette route expose des textes potentiellement sensibles**
+(causes, correctifs, refutations, extraits de preuves). L'API n'a pas d'authentification.
+Reponse **200**, ordre d'ecriture conserve. `signature` filtre par egalite exacte.
+Une signature inconnue ou une memoire vide renvoie :
+
+```json
+{"souvenirs": [], "refutations_par_signature": {}}
+```
+
+Exemple `GET /memoire?signature=schema_mismatch:pipeline_demo` :
+
+```json
+{
+  "souvenirs": [
+    {
+      "signature": "schema_mismatch:pipeline_demo",
+      "cause_confirmee": "colonne renommee probable",
+      "hypotheses_refutees": ["Saturation des ressources", "Probleme reseau ou timeout"],
+      "correctif_essaye": "Restaurer le schema attendu",
+      "resultat": "reussi",
+      "date": "2026-10-07T10:00:00+00:00"
+    }
+  ],
+  "refutations_par_signature": {
+    "schema_mismatch:pipeline_demo": ["Saturation des ressources", "Probleme reseau ou timeout"]
+  }
+}
+```
+
+Fusion des refutations sans doublon, dans l'ordre de leur premiere apparition.
+Le souvenir contient tous les champs du contrat. Les valeurs ci-dessus sont
+illustratives ; les donnees reelles viennent de la memoire injectee.
+Lecture serialisee avec les ecritures d'enquete ; elle peut attendre la fin d'une
+enquete utilisant les dependances partagees. Erreur de stockage : **500** generique.
+
+## POST /memoire/reinitialiser
+
+**Route destructive, locale uniquement, sans authentification : les souvenirs sont
+supprimes definitivement.** Corps obligatoire :
+
+```json
+{"confirmer": true, "incidents": true}
+```
+
+`incidents` vaut `false` par defaut : sans l'option, les resultats et decisions de
+session sont conserves. `confirmer` absent, faux, non booleen : **422**, rien efface.
+Un incident `en_cours`, y compris en file d'attente, impose **409** sans effacement.
+Verification et suppression sont protegees contre une nouvelle soumission concurrente.
+Reponse **200** :
+
+```json
+{"souvenirs_supprimes": 1, "incidents_supprimes": 2}
+```
+
+Apres effacement de session, les identifiants peuvent etre soumis a nouveau.
+L'effacement ne remet pas les autres objets injectes (LLM, traceur) a zero et
+n'annule pas une action externe deja soumise. Erreur memoire : **500** generique,
+la session n'est pas effacee par la route si `vider()` echoue.
+
 ## POST /incidents
 
 Corps : `ContexteIncident` valide, avec les champs exacts du contrat.
