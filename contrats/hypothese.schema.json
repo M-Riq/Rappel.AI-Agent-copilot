@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hypothèse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "incident_id", "texte", "statut", "preuves", "confiance", "raison_rejet"],
+  "properties": {
+    "id": {"type": "string"},
+    "incident_id": {"type": "string"},
+    "texte": {"type": "string"},
+    "statut": {"enum": ["ouverte", "retenue", "refutee"]},
+    "preuves": {"type": "array", "items": {"type": "string"}},
+    "confiance": {"type": "number", "minimum": 0, "maximum": 1},
+    "raison_rejet": {"type": ["string", "null"]}
+  }
+}

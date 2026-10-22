@@ -1,0 +1,16 @@
+{
+  "incident_id": "p1",
+  "horodatage": "2026-10-22T10:00:00Z",
+  "signature": "schema_mismatch:orders_etl",
+  "logs": [
+    {"template": "KeyError: 'amount'", "compte": 214}
+  ],
+  "commits_recents": [
+    {"hash": "a1b2c3", "message": "rename amount->total", "date": "2026-10-22T09:50:00Z"}
+  ],
+  "schema": {
+    "attendu": ["order_id:integer", "amount:decimal"],
+    "observe": ["order_id:integer", "total:decimal"]
+  },
+  "metriques": {"lignes_rejetees": 214, "latence_ms": 120}
+}
