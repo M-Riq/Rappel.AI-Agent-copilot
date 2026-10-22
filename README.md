@@ -22,7 +22,7 @@ Le différenciateur : **preuves vérifiables + mémoire qui influence réellemen
 |---|---|---|
 | 1 | Détection et collecte des indices | La panne produit des logs et un contexte d'incident réel |
 | 2 | Enquête fondée sur des preuves | Comparaison de plusieurs hypothèses, justification de celle retenue |
-| 3 | Mémoire des incidents | Un incident similaire est retrouvé et ses conclusions réutilisées |
+| 3 | Mémoire des incidents et des hypothèses réfutées | Un incident similaire est retrouvé, ses conclusions réutilisées et les pistes réfutées sautées |
 | 4 | Proposition de correctif | Correctif expliqué, avec risque et périmètre d'impact |
 | 5 | Validation et vérification | Action contrôlée ; un échec déclenche un retour arrière |
 | 6 | Abstention | Preuves insuffisantes : aucune modification |
@@ -31,43 +31,75 @@ Le différenciateur : **preuves vérifiables + mémoire qui influence réellemen
 ## Architecture
 
 ```
-[Collecteurs] → [Dossier d'incident] → [Moteur d'hypothèses (Nemotron + règles)]
-     ▲ Zetaris                                ↓                ↑
-                                      [Mémoire (Meterless)]────┘
-                                              ↓
-                                   [Planificateur de correctif + score de risque]
-                                              ↓
-                          [Validation humaine] → [Exécution + vérification + rollback]
-                                              ↓
-                                     [Interface de démo]
+[Collecteurs] → [Dossier d'incident] → [Moteur d'hypothèses + règles]
+     ▲ Zetaris                              │          ↕
+                                            │  [Mémoire (Postgres)]
+                                            │    secours : fichier JSON
+                                            ├→ [Meterless Nightshift] → [Nemotron]
+                                            ↓
+                            [Planificateur de correctif + score de risque]
+                                            ↓
+                   [Validation humaine] → [Exécution + vérification + rollback]
+                                            ↓
+                                   [Interface de démo]
 ```
 
 Le LLM propose des causes ; des **vérifications déterministes** les confirment ou les réfutent.
+
+La mémoire des incidents et des **hypothèses réfutées** est stockée dans **Postgres** (table `hypotheses`), avec un fichier JSON comme secours. L'accès passe uniquement par `memoire.chercher(signature)` et `memoire.ecrire(enregistrement)`. Meterless n'est pas la mémoire : toutes les requêtes LLM passent par **Meterless Nightshift (Meterless Runtime)**, qui les exécute sur des lanes configurées avec des modèles **NVIDIA Nemotron**.
 
 ## Technologies sponsors
 
 | Technologie | Rôle dans Rappel | Preuve à montrer | Code |
 |---|---|---|---|
-| **Zetaris** | Accéder aux données utiles à l'enquête (schéma, échantillons) | Une lecture réelle via Zetaris alimente le dossier d'incident | `rappel/integrations/zetaris.py` |
-| **NVIDIA Nemotron** | Modèle d'IA qui raisonne sur les indices et explique le diagnostic | Un appel réel au modèle pendant la démo | `rappel/integrations/nemotron.py` |
-| **Meterless** | Couche de contexte et de mémoire retenue entre incidents | Mémoire réutilisée entre P1 et P2 ; fonctionnalité Meterless intégrée précisée ci-dessous | `rappel/integrations/meterless.py` |
-| **Cursor + SpaceXAI** | Accélérer développement, tests et débogage | Utilisation documentée dans `docs/CURSOR.md` | `.cursor/rules/rappel.mdc` |
+| **Meterless Nightshift** | Fournisseur d'IA principal ; passerelle OpenAI-compatible : `POST /v1/chat/completions`, `GET /v1/models`. Jeton Runtime dans `Authorization: Bearer`, en-têtes `meterless-app: rappel` et `meterless-scope: user` | Un appel réel via le Runtime et ses run details/receipts | Prévu : `src/rappel/interfaces/llm.py` |
+| **NVIDIA Nemotron** | Modèles servis via Nightshift : lane rapide (ex. `nvidia/nemotron-3.5-lightning-30b-a3b`) pour hypothèses, appels d'outils et rôle détective ; lane profonde (ex. `nvidia/nemotron-3-super-120b-a12b`) pour la conclusion, le sceptique et le correctif. Les noms exacts dépendent du catalogue | Les run details/receipts de Nightshift indiquent un modèle Nemotron ; fixer une lane Nemotron, car `meterless/auto` peut router ailleurs | Via `src/rappel/interfaces/llm.py` (prévu) |
+| **Zetaris** | Lecture des données (schéma, échantillons) via MCP, exposée à l'agent comme outil `run_sql` ; secours en lecture directe par configuration | Une lecture réelle via Zetaris alimente le dossier d'incident | Prévu : `src/rappel/ingestion/` et `src/rappel/interfaces/` |
 
 ### État d'intégration (transparence)
 
-- **Nemotron** : appel via l'API compatible OpenAI de NVIDIA NIM (`https://integrate.api.nvidia.com/v1`), clé `NVIDIA_API_KEY`.
-- **Zetaris** et **Meterless** : les interfaces publiques exactes n'étant pas confirmées, les adaptateurs sont configurables par variables d'environnement (URL, clé, chemins d'API) et utilisent un **repli local explicite** (CSV/SQLite pour les données, JSON pour la mémoire). Le mode utilisé est toujours affiché dans le dossier d'incident (`source: zetaris` ou `source: fallback-local`) : la démo ne prétend jamais à un appel réel qui n'a pas eu lieu. Adaptez les chemins d'API dans `.env` avec la documentation fournie par les sponsors.
+Aucune intégration n'est encore implémentée. La cible est la suivante :
 
-## Démarrage rapide
+- **Nightshift → Nemotron** : aucun appel direct à NVIDIA depuis Rappel. La **clé NVIDIA va uniquement dans Nightshift (Setup → Providers)**, jamais dans le code ni dans le `.env`.
+- **Zetaris** : lecture via MCP ; secours en lecture directe (CSV/SQLite) activable par configuration. Le mode utilisé sera affiché dans le dossier d'incident (`source: zetaris` ou `source: fallback-local`) : la démo ne prétendra jamais à un appel réel qui n'a pas eu lieu.
+- **Mémoire** : Postgres, avec secours JSON, indépendamment du fournisseur d'IA.
+
+Configuration cible du `.env` :
+
+```dotenv
+METERLESS_BASE_URL=http://127.0.0.1:8088/v1
+METERLESS_RUNTIME_TOKEN=
+METERLESS_MODEL=meterless/auto
+```
+
+Copier l'URL et le jeton Runtime depuis la Console de Nightshift. `127.0.0.1` ne fonctionne que si Rappel et le Runtime sont sur la même machine. Ne jamais mettre la clé NVIDIA ici. Pour la démo, remplacer `meterless/auto` par la lane Nemotron choisie et vérifier le modèle dans les receipts.
+
+## Démarrage rapide — cible, à venir
+
+> **🚧 Statut : en construction, Phase 0**
+>
+> Le dépôt contient uniquement ce README : aucun code n'existe encore. Les commandes ci-dessous sont la cible et ne fonctionnent pas encore ; les fichiers, modules et points d'entrée restent à créer.
+
+### Prérequis
+
+- Git.
+- Python 3.11 ou 3.12.
+- Docker (pour Postgres uniquement).
+- Meterless Nightshift installé (édition Windows/Mac/DGX, pas la version navigateur), avec NVIDIA connecté et une lane Nemotron active.
+
+### Commandes cibles (à venir)
+
+Depuis la racine du dépôt, dans un terminal Bash :
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env     # renseigner les clés
-python -m rappel.cli demo --scenario amount_total      # P1 : première panne
-python -m rappel.cli demo --scenario amount_total_bis  # P2 : réutilise la mémoire
-python -m rappel.cli demo --scenario unknown           # abstention
-python -m pytest
+cp .env.example .env     # renseigner uniquement la configuration Runtime
+docker compose up -d    # Postgres
+uvicorn rappel.api:app --app-dir src --reload  # API FastAPI, terminal dédié
+streamlit run ui/app.py                       # UI, autre terminal avec venv activé
+pytest                                       # tests, autre terminal avec venv activé
 ```
 
 ## Scénarios de démonstration
@@ -75,22 +107,43 @@ python -m pytest
 - **P1** : `KeyError: 'amount'` → hypothèse « colonne renommée » confirmée, correctif, validation.
 - **P2** : incident similaire → la mémoire est réutilisée, les pistes réfutées sont sautées.
 - **Échec** : le test de non-régression échoue → retour arrière automatique.
-- **Abstention** : preuves insuffisantes → aucune modification.
+- **Abstention (P3)** : preuves insuffisantes → aucune modification.
 
-## Utilisation de Cursor dans le développement
+## Structure cible
 
-Voir [`docs/CURSOR.md`](docs/CURSOR.md).
+Seul `README.md` existe aujourd'hui ; le reste de cette arborescence est à venir.
 
-## Structure
-
+```text
+.
+├── README.md
+├── .gitignore
+├── .env.example
+├── docker-compose.yml
+├── contrats/
+├── fixtures/
+├── pipeline_demo/
+├── ui/
+├── .github/
+│   └── copilot-instructions.md
+├── src/
+│   └── rappel/
+│       ├── enquete/
+│       ├── memoire/
+│       ├── ingestion/
+│       ├── action/
+│       └── interfaces/
+└── tests/
 ```
-rappel/
-  models.py  collectors.py  investigator.py  risk.py  fixer.py  cli.py
-  integrations/ zetaris.py nemotron.py meterless.py
-demo/ scenarios (pipeline cassé, logs, schéma)
-tests/
-docs/CURSOR.md
-```
+
+## Équipe
+
+- **Naomy** : Enquête, Mémoire, Abstention, War room.
+- **Juan** : Ingestion, Action, Rayon d'impact.
+- **Riq** : Interface, tests, pitch.
+
+## Sécurité
+
+Aucune clé dans le dépôt. À la création du projet, `.env` devra être dans `.gitignore` ; seuls des exemples sans secrets seront versionnés. La clé NVIDIA reste uniquement dans Nightshift, jamais dans le code ni dans le `.env`.
 
 ## Licence
 
