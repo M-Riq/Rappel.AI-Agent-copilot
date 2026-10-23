@@ -45,6 +45,11 @@ class DecisionCorrectif(BaseModel):
     decision: Literal["appliquer", "refuser"]
 
 
+class IncidentDepuisDemo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    incident_id: str | None = None
+
+
 class ResultatAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     resultat: Literal["reussi", "echoue"]
@@ -219,6 +224,22 @@ def creer_app(
             valider("contexte_incident", contexte)
         except ValidationError:
             raise HTTPException(422, "ContexteIncident non conforme au contrat.") from None
+        return enregistrer_incident(contexte)
+
+    @application.post("/incidents/depuis-demo", status_code=201)
+    def creer_incident_depuis_demo(corps: IncidentDepuisDemo | None = None):
+        """Option : contexte construit depuis l'état courant du pipeline de démo (simulé)."""
+        from rappel.ingestion.contexte_demo import construire_contexte
+
+        try:
+            contexte, infos = construire_contexte(incident_id=corps.incident_id if corps else None)
+        except (OSError, KeyError, ValueError):
+            raise HTTPException(409, "Pipeline de démo absent ou illisible : lancer l'injecteur (reset, p1, p2 ou p3).") from None
+        reponse = enregistrer_incident(contexte)
+        return {**reponse, "source": "pipeline_demo", "simulation": True, "signature": contexte["signature"],
+                "statut_pipeline": infos["statut_pipeline"], "reducteur_logs": infos["reducteur_logs"]}
+
+    def enregistrer_incident(contexte):
         identifiant = contexte["incident_id"]
         jeton = object()
         with verrou:

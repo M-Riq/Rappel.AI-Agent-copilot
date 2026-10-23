@@ -31,6 +31,10 @@ Modes lus à chaque requête dans `rappel.config.Configuration` (`LLM_PROVIDER`,
   fixture « p1 » non soumise renvoie **501** ;
 - **404** si l'incident est inconnu.
 
+Avec `ACTION_REELLE_DEMO=1` (défaut `0`), « appliquer » sur un correctif du moteur l'exécute sur le
+pipeline de démo isolé uniquement (sauvegarde, relance, restauration si échec) : réponse `execute`
+selon le résultat et champ `action` (statut, niveau, empreintes SHA-256). Sinon, rien n'est exécuté.
+
 `POST /correctifs/{id}/decision` : si l'enquête a produit un correctif, la décision est
 enregistrée et ajoutée au fil (événement `decision`) ; sinon, en mode fake, « p1 » vise le
 correctif de fixture comme avant ; **409** si l'enquête est en cours ou sans correctif
@@ -43,6 +47,7 @@ correctif de fixture comme avant ; **409** si l'enquête est en cours ou sans co
 | GET | `/incidents` | Résumés récents (`limite` 1-200, défaut 50 ; filtre `statut` : `en_cours`, `termine`, `erreur`) |
 | GET | `/incidents/{id}` | Statut et résultat de l'enquête |
 | GET | `/incidents/{id}/enquete/evenements?apres=N` | Fil en direct de l'enquête (étapes > N), tous modes |
+| POST | `/incidents/depuis-demo` | Option : contexte construit depuis l'état courant du pipeline de démo (`{"incident_id"?}`) -> **201** `{id, source: "pipeline_demo", simulation: true, signature, statut_pipeline, reducteur_logs}` ; **409** si le pipeline de démo est absent ou l'identifiant déjà pris |
 | GET | `/comparaison?a=<id>&b=<id>` | Métriques de deux enquêtes terminées, réductions et règle des 60 % |
 | POST | `/incidents/{id}/resultat-action` | `{"resultat": "reussi" \| "echoue"}` -> met à jour le dernier souvenir de la signature (**202**) |
 | GET | `/memoire?signature=...` | Souvenirs et réfutations par signature (textes potentiellement sensibles) |
