@@ -25,6 +25,9 @@ M-Riq).
 | `6ff998c` | 06/10 20:32 | Fixtures générées depuis l'enquête |
 | `7ed3acf` | 07/10 06:56 | API : liste des incidents, mémoire, réinitialisation |
 
+Les numéros A1-A15 de ce tableau reprennent les messages de commit de l'époque, avec une
+numérotation antérieure au cahier MVP v4 (la correspondance actuelle est dans `module-enquete.md`).
+
 Ce code préexistant comprend : le graphe d'enquête en mode « outils » (hypothèses
 proposées par le LLM, testées par des outils déterministes), la mémoire JSON et son influence,
 la politique d'abstention, la war room, l'API locale d'origine, les scripts et les tests.
@@ -48,7 +51,18 @@ Le squelette de l'équipe (M-Riq, Juan, agent Copilot) date du 22-23 octobre
 | `4a13775` | 23/10 10:50 | Import dans le squelette : modèles, protocoles, adaptateurs `LLMEnquete` (Meterless) et `MemoireEnquete` (JSON/Postgres), `RunSqlZetaris`, configuration unique, alignement sur les tables et contrats de l'équipe (`sql/init.sql`, `contrats/*.schema.json`), tests de conformité |
 | commit suivant | 23/10 | API étendue (enquête en thread, fil en direct, résultat, mémoire) sur le contrat du squelette, scripts portés, documentation et cette déclaration |
 
-## 4. Ce qui n'a pas été repris
+## 4. Finition du Module A (branche `naomy/finition-module-a`, 23 octobre 2026)
+
+| Commit | Date | Contenu |
+| --- | --- | --- |
+| `70f31d0` | 23/10 15:29 | Recette automatique A1-A15 (`scripts/recette_module_a.py`) |
+| `285e878` | 23/10 15:36 | Appels d'outils natifs `run_sql` optionnels (`LLM_APPEL_OUTILS`) |
+| `1f3e22c` | 23/10 15:40 | Robustesse aux réponses réelles du modèle, contrôle de portabilité SQL |
+| `c937de1` | 23/10 15:46 | Secours JSON automatique de la mémoire Postgres, `scripts/check_postgres.py` |
+| `c1a0b90` | 23/10 15:49 | Route `GET /comparaison` (P1 contre P2) |
+| commit suivant | 23/10 | Documentation de finition du Module A |
+
+## 5. Ce qui n'a pas été repris
 
 - Adaptateurs NVIDIA et Claude, secours entre fournisseurs, variables `NIGHTSHIFT_*` et
   `RUN_SQL_BACKEND` : l'équipe passe uniquement par Meterless et par sa configuration.

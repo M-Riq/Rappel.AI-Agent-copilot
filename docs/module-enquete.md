@@ -122,6 +122,13 @@ inconnu, des arguments illisibles, une requete vide ou un appel sans hypothese d
 un evenement `rejet` explicite (« Appel d'outil run_sql rejete : ... »), jamais une exception ;
 plusieurs instructions sont refusees par `valider_sql`. Le mode par defaut est inchange.
 
+Robustesse aux reponses d'un vrai modele ([test_robustesse_modele.py](../tests/test_robustesse_modele.py)) :
+texte autour du JSON et bloc ```json acceptes ; JSON tronque, texte sans JSON, liste vide ou
+hypotheses sans `sql` : une relance (qui coute un tour) puis abstention propre ; SQL avec `;` final
+ou dans un bloc ```sql nettoye avant validation ; table hors liste blanche refusee sans execution ;
+verdict citant une requete inexistante : hypothese refutee ; statut de verdict inconnu : relance
+puis abstention. Portabilite SQL : voir [run_sql.md](run_sql.md#8-portabilite-sql-dialecte-zetaris-inconnu).
+
 Plafond : `max_tours` vaut `Configuration.max_tours_enquete` (MAX_TOURS_ENQUETE) par defaut. S'il est atteint avant la conclusion, evenement `decision`
 « Plafond de N tours atteint : appel ... non effectue, abstention sans correctif »
 (N = valeur reelle), puis abstention dont `manque` contient
@@ -198,7 +205,7 @@ ne sont jamais reecrites.
 21 decision  systeme   -            Resultat provisoire enregistre en memoire
 ```
 
-### Tracage optionnel (A14)
+### Tracage optionnel (Langfuse)
 
 [traceur.py](../src/rappel/enquete/traceur.py) implemente le protocole `Traceur` (defini dans `protocoles.py`) :
 `demarrer(incident_id, signature)`, `evenement(EvenementEnquete)` et
@@ -272,6 +279,8 @@ python scripts/demo_enquete.py --mode outils --war-room --json data/demo.json
 python scripts/stabilite_p1.py                     # mode sql par defaut, --mode outils possible
 python scripts/generer_fixtures_partagees.py --verifier
 python scripts/verifier_pret.py                    # configuration, securite du depot, demo a blanc
+python scripts/recette_module_a.py                 # recette A1-A15 ; data/recette.json ; --confirmer si service reel
+python scripts/check_postgres.py                   # memoire Postgres : connexion, tables, aller-retour annule
 python scripts/check_meterless.py                  # script de l'equipe : appel reel Nightshift
 ```
 
@@ -324,6 +333,16 @@ les JSON Schema et exposent les memes methodes, plus `lister_hypotheses(signatur
   table `hypotheses` dans `<nom>_hypotheses.json` (meme identifiant = ligne remplacee).
 - `MemoirePostgres` : `psycopg` importe paresseusement, toutes les requetes parametrees
   (`%s`), aucune valeur concatenee ; `hypotheses` en `INSERT ... ON CONFLICT (id) DO UPDATE`.
+- `MemoireAvecSecours(principal, secours)` : avec `MEMOIRE_PROVIDER=postgres`, le backend est
+  Postgres avec secours JSON (`MEMOIRE_JSON_PATH`). Si Postgres leve « Connexion a la memoire
+  Postgres impossible » (ou si le pilote manque), l'appel bascule sur le JSON, une seule alerte
+  assainie est journalisee et `mode` vaut `fallback-json` ; chaque appel retente Postgres, donc
+  `mode` revient a `postgres` des qu'il repond. Les ecritures faites en secours restent dans le
+  JSON (pas de synchronisation automatique). Le mode apparait dans `GET /healthz`
+  (`memoire_mode_effectif`) et `GET /incidents/{id}` (`memoire_mode`).
+- `scripts/check_postgres.py` : `SELECT 1`, presence des tables de `sql/init.sql`, aller-retour
+  ecriture/lecture/suppression dans une transaction annulee ; mot de passe masque, pilote importe
+  a la demande. Test d'integration reel : `RAPPEL_TEST_POSTGRES=1 pytest tests/test_postgres_integration.py`.
 
 La boucle appelle `ecrire_hypotheses` apres chaque enquete (deux modes, abstention comprise).
 La date d'un enregistrement est au format `AAAA-MM-JJ` (contrat `enregistrement_memoire`).
@@ -487,26 +506,30 @@ un identifiant d'incident.
 
 ## 8. Checklist A1 a A15 (cahier MVP v4)
 
-Le texte exact du cahier n'est pas dans le depot : A1-A6 reprennent les definitions du
-prompt MVP v4 (mode sql), A7-A15 la numerotation precedente.
+Etat mesure par `scripts/recette_module_a.py` en mode fake/fichier/json (23/10/2026). Une case
+« reussi (simule) » est verifiee sur les doubles hors reseau ; sa partie reelle reste a mesurer.
 
-| Case | Etat | Preuve dans les tests |
-| ---- | ---- | --------------------- |
-| A1 | Fait | Au moins 2 hypotheses avec statut : [test_enquete_sql.py](../tests/test_enquete_sql.py) |
-| A2 | Fait | Retenue citant une requete executee non vide ; verdict mensonger refute |
-| A3 | Fait | `preuve` portant le SQL reellement execute ; SQL dangereux refuse sans execution |
-| A4 | Fait | Evenements conformes aux JSON Schema : [test_conformite_contrats.py](../tests/test_conformite_contrats.py) |
-| A5 | Fait | P1 conclut « colonne renommée », correctif conforme |
-| A6 | Fait | Plafond de tours (`MAX_TOURS_ENQUETE`), abstention sans correctif |
-| A7 | Fait | P2 apres P1 : evenements et appels LLM <= 60 % |
-| A8 | Fait | Memoire contraire : aucun correctif de schema |
-| A9 | Fait | P3 (timeout) : abstention, elements manquants listes |
-| A10 | Fait | Calibration P1/P2/P3 et robustesse : [test_calibration_sql.py](../tests/test_calibration_sql.py) |
-| A11 | Fait (mode outils) | War room hors MVP : [test_war_room.py](../tests/test_war_room.py) |
-| A12 | Fait | Mode outils identique a l'ancien comportement |
-| A13 | Fait en simulation ; reel a faire | Lanes Meterless, modele renvoye, compteurs, plafond, non-fuite : [test_adaptateurs.py](../tests/test_adaptateurs.py) |
-| A14 | Code pret, liaison SDK a verifier | [test_traceur.py](../tests/test_traceur.py) |
-| A15 | Mecanisme fait ; mesure reelle a faire | `stabilite_p1.py` en mode sql : 5/5 avec le LLM faux |
-| API | Fait (contrat du squelette conserve) | [test_api.py](../tests/test_api.py) (equipe), [test_api_enquete.py](../tests/test_api_enquete.py) |
-| Memoire | Fait (JSON + Postgres simule) | [test_adaptateurs.py](../tests/test_adaptateurs.py) |
-| run_sql | Fait (fichier + Zetaris simule) | [test_run_sql.py](../tests/test_run_sql.py) |
+| Case | Libelle du cahier MVP v4 | Etat | Partie reelle |
+| ---- | ------------------------ | ---- | ------------- |
+| A1 | ≥ 2 hypotheses avec statut sur contexte_p1.json | reussi | - |
+| A2 | Toute hypothese retenue cite ≥ 1 preuve reelle | reussi | - |
+| A3 | Chaque preuve affichee renvoie a une requete SQL executee (requete_sql) | reussi (simule, SQLite) | non mesuree : Zetaris |
+| A4 | Chaque etape ecrit un EvenementEnquete valide (evenement_enquete.schema.json) | reussi | - |
+| A5 | P1 conclut « colonne renommee » et le CorrectifPropose valide son schema | reussi | - |
+| A6 | Arret au plafond (MAX_TOURS_ENQUETE, defaut 6) avec un message clair | reussi | - |
+| A7 | Apres P1, EnregistrementMemoire avec hypotheses refutees ecrit en memoire | reussi (simule, JSON) | non mesuree : Postgres |
+| A8 | P2 retrouve P1 et ne reteste aucune hypothese refutee | reussi | - |
+| A9 | P2 ≤ 60 % des evenements de P1 et moins d'appels LLM | reussi (12/21, 3/5) | - |
+| A10 | Memoire contraire : l'agent change de decision | reussi | - |
+| A11 | P3 : abstention, aucun correctif, elements manquants listes | reussi | - |
+| A12 | Seuil calibre : P1 et P2 sans abstention, P3 avec | reussi | - |
+| A13 | Changer de voie ou de modele par configuration (METERLESS_MODEL_RAPIDE/PROFOND) | reussi (deux configurations) | - |
+| A14 | En mode reel, le modele renvoye contient « nemotron » | non mesure | non mesuree : Nightshift |
+| A15 | P1 rejouee 5 fois : meme conclusion au moins 4 fois | reussi (simule, 5/5) | non mesuree : Nightshift |
+
+Tests : [test_recette_module_a.py](../tests/test_recette_module_a.py), [test_enquete_sql.py](../tests/test_enquete_sql.py),
+[test_calibration_sql.py](../tests/test_calibration_sql.py), [test_conformite_contrats.py](../tests/test_conformite_contrats.py),
+[test_adaptateurs.py](../tests/test_adaptateurs.py), [test_memoire_secours.py](../tests/test_memoire_secours.py),
+[test_api.py](../tests/test_api.py) (equipe) et [test_api_enquete.py](../tests/test_api_enquete.py).
+En mode reel : `LLM_PROVIDER=meterless SOURCE_PROVIDER=zetaris MEMOIRE_PROVIDER=postgres
+python scripts/recette_module_a.py --confirmer`.

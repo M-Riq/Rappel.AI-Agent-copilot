@@ -29,13 +29,17 @@ pytest --ignore=tests/test_ui.py           # sans Streamlit ; pytest complet ave
 uvicorn rappel.api:app --app-dir src       # API locale
 python scripts/demo_enquete.py             # P1, P2, P3 : métriques et contrôle de santé
 python scripts/verifier_pret.py            # configuration, sécurité du dépôt, démo à blanc
+python scripts/recette_module_a.py         # recette A1-A15 du Module A (data/recette.json)
 streamlit run ui/app.py                    # interface P1
 ```
 
 Machine de démonstration : `pip install -r requirements-demo.txt` (psycopg),
 `docker compose up -d postgres`, puis dans `.env` : `LLM_PROVIDER=meterless`,
 `SOURCE_PROVIDER=zetaris`, `MEMOIRE_PROVIDER=postgres`. Vérifier avec
-`python scripts/check_meterless.py` et `python scripts/check_zetaris.py`.
+`python scripts/check_meterless.py`, `python scripts/check_zetaris.py` et
+`python scripts/check_postgres.py`, puis `python scripts/recette_module_a.py --confirmer`.
+Si Postgres est injoignable, la mémoire bascule sur le JSON local et l'API l'affiche
+(`memoire_mode_effectif`, `memoire_mode` : `fallback-json`).
 
 ## Modes
 
