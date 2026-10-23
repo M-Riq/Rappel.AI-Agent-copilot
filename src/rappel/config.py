@@ -29,6 +29,7 @@ class Configuration:
     )
     seuil_abstention: float = 0.6
     max_tours_enquete: int = 6
+    llm_max_appels: int = 20
     api_url: str = "http://127.0.0.1:8000"
 
     def __post_init__(self):
@@ -43,6 +44,8 @@ class Configuration:
             raise ValueError("SEUIL_ABSTENTION doit être compris entre 0 et 1.")
         if self.max_tours_enquete < 1:
             raise ValueError("MAX_TOURS_ENQUETE doit être positif.")
+        if self.llm_max_appels < 1:
+            raise ValueError("LLM_MAX_APPELS doit être positif.")
 
 
 def charger() -> Configuration:
@@ -54,6 +57,7 @@ def charger() -> Configuration:
     for nom, convertir in (
         ("seuil_abstention", float),
         ("max_tours_enquete", int),
+        ("llm_max_appels", int),
     ):
         if nom in valeurs:
             valeurs[nom] = convertir(valeurs[nom])
