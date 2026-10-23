@@ -312,13 +312,16 @@ def test_postgres_lister_vider_et_lister_hypotheses(monkeypatch):
 def test_memoire_enquete_pydantic_sur_postgres(monkeypatch):
     curseur, _ = pilote_faux(monkeypatch, [[("sig:comp", "Cause", ["A"], "Correctif", "reussi", date(2026, 10, 22))]])
     adaptateur = MemoireEnquete()
-    assert isinstance(adaptateur.backend, memoire.MemoirePostgres)
+    # MEMOIRE_PROVIDER=postgres : Postgres en principal, secours JSON (MemoireAvecSecours).
+    assert isinstance(adaptateur.backend, memoire.MemoireAvecSecours)
+    assert isinstance(adaptateur.backend.principal, memoire.MemoirePostgres)
     assert adaptateur.chercher("sig:comp") == [EnregistrementMemoire(**enregistrement(hypotheses_refutees=["A"]))]
     adaptateur.ecrire(EnregistrementMemoire(**enregistrement()))
     assert "VALUES (%s, %s, %s::jsonb" in curseur.requetes[-1][0]
     adaptateur.ecrire_hypotheses("p1", "sig:comp", [Hypothese(**hypothese())])
     assert curseur.requetes[-1][1][0] == "p1:hyp-1"
-    assert repr(adaptateur) == "MemoireEnquete(backend=MemoirePostgres)"
+    assert repr(adaptateur) == "MemoireEnquete(backend=MemoireAvecSecours)"
+    assert adaptateur.backend.mode == "postgres"
 
 
 def test_memoire_json_ne_charge_pas_psycopg(tmp_path):

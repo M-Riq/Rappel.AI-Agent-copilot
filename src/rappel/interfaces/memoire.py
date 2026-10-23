@@ -1,6 +1,7 @@
 """Mémoire JSON locale ou Postgres, sans charger psycopg en mode léger."""
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -11,6 +12,11 @@ from rappel.config import RACINE, charger
 from rappel.contrats import valider
 
 _VERROU = RLock()
+LOGGER = logging.getLogger(__name__)
+MESSAGE_CONNEXION_POSTGRES = "Connexion à la mémoire Postgres impossible."
+MESSAGE_PILOTE_POSTGRES = "Installer requirements-demo.txt pour la mémoire Postgres."
+# Mode effectif observe dans le processus (pour /healthz) et alerte de bascule unique.
+_ETAT_SECOURS = {"mode": None, "alerte_emise": False}
 RESULTATS = ("reussi", "echoue")
 COLONNES_HYPOTHESES = (
     "id", "incident_id", "signature", "texte", "statut", "preuves", "confiance", "raison_rejet", "cree_le",
@@ -138,11 +144,11 @@ class MemoirePostgres:
         try:
             import psycopg
         except ImportError:
-            raise RuntimeError("Installer requirements-demo.txt pour la mémoire Postgres.") from None
+            raise RuntimeError(MESSAGE_PILOTE_POSTGRES) from None
         try:
             return psycopg.connect(self.database_url, connect_timeout=5)
         except psycopg.Error:
-            raise RuntimeError("Connexion à la mémoire Postgres impossible.") from None
+            raise RuntimeError(MESSAGE_CONNEXION_POSTGRES) from None
 
     def _enregistrements(self, requete, parametres):
         with self._connecter() as connexion, connexion.cursor() as curseur:
@@ -250,6 +256,55 @@ class MemoirePostgres:
             )
 
 
+class MemoireAvecSecours:
+    """Postgres en principal, JSON local en secours si Postgres est injoignable.
+
+    Chaque appel essaie d'abord le principal : le retour de Postgres est donc automatique.
+    `mode` vaut "postgres" ou "fallback-json" ; les ecritures faites en secours restent dans le
+    fichier JSON (aucune synchronisation automatique vers Postgres).
+    """
+
+    METHODES = ("chercher", "lister", "ecrire", "vider", "hypotheses_refutees",
+                "mettre_a_jour_resultat", "ecrire_hypotheses", "lister_hypotheses")
+
+    def __init__(self, principal, secours):
+        self.principal = principal
+        self.secours = secours
+        self.mode = "postgres"
+
+    def __repr__(self):
+        return f"MemoireAvecSecours(mode={self.mode!r})"
+
+    def _noter(self, mode):
+        self.mode = mode
+        _ETAT_SECOURS["mode"] = mode
+
+    def _appeler(self, nom, *arguments):
+        try:
+            resultat = getattr(self.principal, nom)(*arguments)
+        except RuntimeError as erreur:
+            if str(erreur) not in (MESSAGE_CONNEXION_POSTGRES, MESSAGE_PILOTE_POSTGRES):
+                raise
+            if not _ETAT_SECOURS["alerte_emise"]:
+                _ETAT_SECOURS["alerte_emise"] = True
+                # Message fixe : jamais l'URL, l'identifiant ni le mot de passe.
+                LOGGER.warning("Mémoire Postgres indisponible : bascule sur la mémoire JSON locale (fallback-json).")
+            self._noter("fallback-json")
+            return getattr(self.secours, nom)(*arguments)
+        self._noter("postgres")
+        return resultat
+
+    def __getattr__(self, nom):
+        if nom in MemoireAvecSecours.METHODES:
+            return lambda *arguments: self._appeler(nom, *arguments)
+        raise AttributeError(nom)
+
+
+def mode_memoire_effectif():
+    """Dernier mode observe pour la memoire Postgres : postgres, fallback-json ou non_verifie."""
+    return _ETAT_SECOURS["mode"] or "non_verifie"
+
+
 def _json(valeur):
     # psycopg décode JSONB en objets Python ; une chaîne reste possible selon l'adaptation.
     return json.loads(valeur) if isinstance(valeur, (str, bytes)) else valeur
@@ -259,7 +314,8 @@ def _memoire():
     configuration = charger()
     if configuration.memoire_provider == "json":
         return MemoireJSON(configuration.memoire_json_path)
-    return MemoirePostgres(configuration.database_url)
+    return MemoireAvecSecours(MemoirePostgres(configuration.database_url),
+                              MemoireJSON(configuration.memoire_json_path))
 
 
 def chercher(signature):

@@ -71,6 +71,20 @@ def _fixture(nom):
     return json.loads((RACINE / "fixtures" / nom).read_text(encoding="utf-8"))
 
 
+def mode_memoire(memoire):
+    """json, postgres ou fallback-json selon le backend effectivement utilise."""
+    from rappel.interfaces.memoire import MemoireJSON, MemoirePostgres
+
+    backend = getattr(memoire, "backend", memoire)
+    if getattr(backend, "mode", None):
+        return backend.mode
+    if isinstance(backend, MemoireJSON):
+        return "json"
+    if isinstance(backend, MemoirePostgres):
+        return "postgres"
+    return type(backend).__name__
+
+
 def _json_contrat(objet):
     return objet.model_dump(mode="json", exclude_none=True)
 
@@ -164,15 +178,16 @@ def creer_app(
         try:
             # Budgets LLM et mémoire sont mutables : une enquête à la fois.
             with verrou_execution:
+                memoire_utilisee = memoire_courante()
                 resultat = enqueter(
-                    contexte, memoire_courante(), llm or creer_llm_enquete(),
+                    contexte, memoire_utilisee, llm or creer_llm_enquete(),
                     abstention or AbstentionSeuil(), sur_evenement=recevoir, traceur=suivi,
                     mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
                 )
             with verrou:
                 etat = courant()
                 if etat is not None:
-                    etat.update(resultat=resultat, statut="termine")
+                    etat.update(resultat=resultat, statut="termine", memoire_mode=mode_memoire(memoire_utilisee))
         except Exception:
             # Aucun détail d'exception exposé ni journalisé (secrets possibles).
             with verrou:
@@ -182,12 +197,18 @@ def creer_app(
 
     def sante():
         configuration = charger()
-        return {
+        reponse = {
             "statut": "ok",
             "llm": configuration.llm_provider,
             "source": configuration.source_provider,
             "memoire": configuration.memoire_provider,
         }
+        if configuration.memoire_provider == "postgres":
+            from rappel.interfaces.memoire import mode_memoire_effectif
+
+            # Cle en plus seulement pour Postgres : mode observe, sans connexion supplementaire.
+            reponse["memoire_mode_effectif"] = mode_memoire_effectif()
+        return reponse
 
     application.get("/healthz")(sante)
     application.get("/sante")(sante)
@@ -208,7 +229,7 @@ def creer_app(
             enquetes[identifiant] = {
                 "jeton": jeton, "statut": "en_cours", "evenements": [], "resultat": None,
                 "message": None, "cree_le": _maintenant(), "resultat_action": None,
-                "llm": charger().llm_provider,
+                "llm": charger().llm_provider, "memoire_mode": None,
             }
         try:
             soumettre(lambda: executer(identifiant, contexte, jeton))
@@ -250,6 +271,7 @@ def creer_app(
             etat = obtenir(identifiant)
             reponse = {
                 "incident_id": identifiant, "statut": etat["statut"], "llm": etat["llm"],
+                "memoire_mode": etat["memoire_mode"],
                 # En mode fake, le raisonnement est simulé : jamais présenté comme réel.
                 "enquete_simulee": etat["llm"] == "fake",
             }
