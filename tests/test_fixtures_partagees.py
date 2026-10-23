@@ -18,10 +18,10 @@ def test_fixtures_existantes_valides_et_etapes():
     assert [element.etape for element in evenements] == list(range(1, len(evenements) + 1))
     assert correctif.niveau_risque in {"auto", "validation", "refus"}
     assert correctif.justification.strip()
-    preuves = [element.texte for element in evenements if element.type == "preuve" and element.acteur == "systeme"]
+    preuves = [element.texte for element in evenements if element.type == "preuve" and element.requete_sql]
     assert preuves and "schema:" in correctif.justification
     assert "schema: colonne manquante amount:float" in correctif.justification
-    assert any("schema: colonne manquante amount:float" in preuve for preuve in preuves)
+    assert any("amount" in preuve for preuve in preuves)
 
 
 def test_types_evenements_sans_debat():

@@ -4,16 +4,20 @@
     "etape": 1,
     "type": "decision",
     "acteur": "systeme",
-    "texte": "Contexte valide, enquete ouverte",
-    "horodatage": "2026-10-15T10:42:00+00:00"
+    "texte": "Contexte valide, enquete ouverte (preuves SQL : simule-sqlite)",
+    "horodatage": "2026-10-15T10:42:00+00:00",
+    "modele": null,
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 2,
-    "type": "preuve",
-    "acteur": "historien",
+    "type": "decision",
+    "acteur": "systeme",
     "texte": "aucun incident similaire",
-    "horodatage": "2026-10-15T10:42:01+00:00"
+    "horodatage": "2026-10-15T10:42:01+00:00",
+    "modele": null,
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
@@ -21,86 +25,188 @@
     "type": "hypothese",
     "acteur": "detective",
     "texte": "Le schema des donnees a change",
-    "horodatage": "2026-10-15T10:42:02+00:00"
+    "horodatage": "2026-10-15T10:42:02+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 4,
-    "type": "hypothese",
+    "type": "preuve",
     "acteur": "detective",
-    "texte": "Saturation des ressources",
-    "horodatage": "2026-10-15T10:42:03+00:00"
+    "texte": "q1 [simule-sqlite] Le schema des donnees a change : 2 ligne(s) ; colonnes ['ecart', 'nom', 'type_attendu', 'type_observe'] ; apercu [[\"absente\", \"amount\", \"float\", null], [\"nouvelle\", \"total\", null, \"float\"]]",
+    "horodatage": "2026-10-15T10:42:03+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT 'absente' AS ecart, a.nom AS nom, a.type AS type_attendu, NULL AS type_observe FROM colonnes_attendues a WHERE a.nom NOT IN (SELECT nom FROM colonnes_observees) UNION ALL SELECT 'type', a.nom, a.type, o.type FROM colonnes_attendues a JOIN colonnes_observees o ON o.nom = a.nom WHERE a.type <> o.type AND a.type <> '?' AND o.type <> '?' UNION ALL SELECT 'nouvelle', o.nom, NULL, o.type FROM colonnes_observees o WHERE o.nom NOT IN (SELECT nom FROM colonnes_attendues) LIMIT 50"
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 5,
     "type": "hypothese",
     "acteur": "detective",
-    "texte": "Probleme reseau ou timeout",
-    "horodatage": "2026-10-15T10:42:04+00:00"
+    "texte": "Saturation des ressources",
+    "horodatage": "2026-10-15T10:42:04+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 6,
-    "type": "hypothese",
+    "type": "preuve",
     "acteur": "detective",
-    "texte": "Changement de configuration",
-    "horodatage": "2026-10-15T10:42:05+00:00"
+    "texte": "q2 [simule-sqlite] Saturation des ressources : 0 ligne(s) ; colonnes ['template', 'compte'] ; apercu []",
+    "horodatage": "2026-10-15T10:42:05+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT template, compte FROM logs WHERE compte > 5 AND lower(template) NOT LIKE 'info%' AND NOT (lower(template) LIKE '%passed%' OR lower(template) LIKE '%healthy%' OR lower(template) LIKE '%recovered%' OR lower(template) LIKE '%success%') AND (lower(template) LIKE '%memory%' OR lower(template) LIKE '%memoire%' OR lower(template) LIKE '%disk%' OR lower(template) LIKE '%disque%' OR lower(template) LIKE '%oom%') ORDER BY compte DESC LIMIT 50"
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 7,
-    "type": "preuve",
-    "acteur": "systeme",
-    "texte": "Le schema des donnees a change: [\"schema: colonne manquante amount:float\", \"schema: nouvelle colonne total:float\", \"commits: a1b2c3d: orders_etl: rename output column amount to total (2026-10-15T10:15:00Z)\", \"logs: KeyError: column <*> not found (compte=12480)\", \"logs: ERROR orders_etl: required column amount missing from input batch <*> (compte=24)\", \"logs: INFO orders_etl: input columns detected: id,total (compte=24)\"]; retenue",
-    "horodatage": "2026-10-15T10:42:06+00:00"
+    "type": "hypothese",
+    "acteur": "detective",
+    "texte": "Probleme reseau ou timeout",
+    "horodatage": "2026-10-15T10:42:06+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 8,
-    "type": "rejet",
-    "acteur": "systeme",
-    "texte": "Saturation des ressources: []; Aucune preuve fournie par l'outil",
-    "horodatage": "2026-10-15T10:42:07+00:00"
+    "type": "preuve",
+    "acteur": "detective",
+    "texte": "q3 [simule-sqlite] Probleme reseau ou timeout : 0 ligne(s) ; colonnes ['template', 'compte'] ; apercu []",
+    "horodatage": "2026-10-15T10:42:07+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT template, compte FROM logs WHERE compte > 5 AND lower(template) NOT LIKE 'info%' AND NOT (lower(template) LIKE '%passed%' OR lower(template) LIKE '%healthy%' OR lower(template) LIKE '%recovered%' OR lower(template) LIKE '%success%') AND (lower(template) LIKE '%timeout%' OR lower(template) LIKE '%connection%' OR lower(template) LIKE '%connexion%' OR lower(template) LIKE '%network%' OR lower(template) LIKE '%reseau%') ORDER BY compte DESC LIMIT 50"
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 9,
-    "type": "rejet",
-    "acteur": "systeme",
-    "texte": "Probleme reseau ou timeout: []; Aucune preuve fournie par l'outil",
-    "horodatage": "2026-10-15T10:42:08+00:00"
+    "type": "hypothese",
+    "acteur": "detective",
+    "texte": "Changement de configuration",
+    "horodatage": "2026-10-15T10:42:08+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 10,
-    "type": "rejet",
-    "acteur": "systeme",
-    "texte": "Changement de configuration: []; Aucune preuve fournie par l'outil",
-    "horodatage": "2026-10-15T10:42:09+00:00"
+    "type": "preuve",
+    "acteur": "detective",
+    "texte": "q4 [simule-sqlite] Changement de configuration : 0 ligne(s) ; colonnes ['hash', 'message', 'date'] ; apercu []",
+    "horodatage": "2026-10-15T10:42:09+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT hash, message, date FROM commits WHERE lower(message) LIKE '%config%' OR lower(message) LIKE '%parametre%' OR lower(message) LIKE '%parameter%' ORDER BY date DESC LIMIT 50"
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 11,
     "type": "decision",
     "acteur": "systeme",
-    "texte": "Confiance 1.00; abstention=False",
-    "horodatage": "2026-10-15T10:42:10+00:00"
+    "texte": "Verdict provisoire (tour 2) : 1 requete(s) de suivi demandee(s)",
+    "horodatage": "2026-10-15T10:42:10+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 12,
-    "type": "decision",
-    "acteur": "systeme",
-    "texte": "Correctif propose pour validation: Restaurer le schema attendu de orders_etl: id:int, amount:float",
-    "horodatage": "2026-10-15T10:42:11+00:00"
+    "type": "preuve",
+    "acteur": "detective",
+    "texte": "q5 [simule-sqlite] Le schema des donnees a change : 1 ligne(s) ; colonnes ['hash', 'message', 'date'] ; apercu [[\"a1b2c3d\", \"orders_etl: rename output column amount to total\", \"2026-10-15T10:15:00Z\"]]",
+    "horodatage": "2026-10-15T10:42:11+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT hash, message, date FROM commits WHERE lower(message) LIKE '%rename%' OR lower(message) LIKE '%renomm%' OR lower(message) LIKE '%column%' OR lower(message) LIKE '%colonne%' OR lower(message) LIKE '%schema%' OR lower(message) LIKE '%type%' ORDER BY date DESC LIMIT 50"
   },
   {
     "incident_id": "inc-p1-0001",
     "etape": 13,
     "type": "decision",
-    "acteur": "historien",
+    "acteur": "systeme",
+    "texte": "Verdict du modele (tour 3) : hyp-1 retenue ['q1', 'q5']; hyp-2 refutee []; hyp-3 refutee []; hyp-4 refutee []",
+    "horodatage": "2026-10-15T10:42:12+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 14,
+    "type": "decision",
+    "acteur": "systeme",
+    "texte": "Hypothese retenue par le code : Le schema des donnees a change (preuves SQL : q1, q5 ; confiance initiale 0.90)",
+    "horodatage": "2026-10-15T10:42:13+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 15,
+    "type": "rejet",
+    "acteur": "systeme",
+    "texte": "Saturation des ressources : refutee (requetes sans resultat)",
+    "horodatage": "2026-10-15T10:42:14+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 16,
+    "type": "rejet",
+    "acteur": "systeme",
+    "texte": "Probleme reseau ou timeout : refutee (requetes sans resultat)",
+    "horodatage": "2026-10-15T10:42:15+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 17,
+    "type": "rejet",
+    "acteur": "systeme",
+    "texte": "Changement de configuration : refutee (requetes sans resultat)",
+    "horodatage": "2026-10-15T10:42:16+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 18,
+    "type": "decision",
+    "acteur": "systeme",
+    "texte": "Confiance 1.00; abstention=False; tables a preuve non vide : ['colonnes_attendues', 'colonnes_observees', 'commits']",
+    "horodatage": "2026-10-15T10:42:17+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 19,
+    "type": "decision",
+    "acteur": "systeme",
+    "texte": "Cause confirmee : colonne renommée (amount -> total)",
+    "horodatage": "2026-10-15T10:42:18+00:00",
+    "modele": "faux-profond",
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 20,
+    "type": "decision",
+    "acteur": "systeme",
+    "texte": "Correctif propose pour validation: Restaurer le schema attendu de orders_etl: id:int, amount:float",
+    "horodatage": "2026-10-15T10:42:19+00:00",
+    "modele": "faux-profond",
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-p1-0001",
+    "etape": 21,
+    "type": "decision",
+    "acteur": "systeme",
     "texte": "Resultat provisoire enregistre en memoire",
-    "horodatage": "2026-10-15T10:42:12+00:00"
+    "horodatage": "2026-10-15T10:42:20+00:00",
+    "modele": null,
+    "requete_sql": null
   }
 ]

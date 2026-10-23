@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -14,6 +14,7 @@ from ..contrats import (
 from ..interfaces.abstention import Abstention, DecisionAbstention
 from ..interfaces.llm import LLM
 from ..interfaces.memoire import Memoire
+from ..interfaces.run_sql import RunSql
 from ..interfaces.traceur import Traceur, proteger_traceur
 from . import outils, war_room
 
@@ -31,6 +32,10 @@ class MetriquesEnquete:
     nb_objections: int = 0
     nb_objections_sans_reponse: int = 0
     nb_appels_llm_war_room: int = 0
+    nb_tours: int = 0
+    nb_requetes_sql: int = 0
+    nb_appels_rapide: int = 0
+    nb_appels_profonde: int = 0
 
 
 class CandidatDetective(BaseModel):
@@ -51,6 +56,11 @@ class ResultatEnquete:
     decision_abstention: DecisionAbstention
     enregistrement: EnregistrementMemoire | None
     metriques: MetriquesEnquete
+    mode_preuves: str = "outils"
+    # Mode du backend de preuves SQL ("simule-sqlite", "zetaris") ; None en mode outils.
+    source_preuves: str | None = None
+    # Requetes proposees en mode sql (identifiant, SQL execute, resultat ou erreur).
+    requetes_sql: list[dict] = field(default_factory=list)
 
 
 class EtatEnquete(TypedDict, total=False):
@@ -359,10 +369,21 @@ def enqueter(
     war_room_max_tours: int | None = None,
     war_room_max_appels_llm: int | None = None,
     traceur: Traceur | None = None,
+    mode_preuves: Literal["sql", "outils"] = "sql",
+    run_sql: RunSql | None = None,
+    max_tours: int | None = None,
+    fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
         raise ValueError("resultat doit etre reussi ou echoue")
+    if mode_preuves not in {"sql", "outils"}:
+        raise ValueError("mode_preuves doit etre sql ou outils")
+    from . import boucle_sql
+
+    max_tours = boucle_sql.MAX_TOURS if max_tours is None else max_tours
+    if max_tours < 1:
+        raise ValueError("max_tours doit etre superieur ou egal a 1")
     config_debat = war_room.configuration(war_room_active, war_room_max_tours, war_room_max_appels_llm)
     suivi = proteger_traceur(traceur)
     trace_demarre = False
@@ -384,18 +405,34 @@ def enqueter(
     appels_avant = getattr(usage, "nb_appels", None)
     entree_avant = getattr(usage, "tokens_entree", None)
     sortie_avant = getattr(usage, "tokens_sortie", None)
+    ressources = {"run_sql": None}
     try:
-        etat = creer_graphe(
-            memoire, llm, abstention, sur_evenement=transmettre,
-            configuration_war_room=config_debat,
-        ).invoke({
-            "contexte": contexte, "evenements": [], "hypotheses": [],
-            "correctif": None, "enregistrement": None, "resultat_action": resultat,
-            "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
-            "erreur_llm": None,
-            "nb_tours_war_room": 0, "nb_objections": 0,
-            "nb_objections_sans_reponse": 0, "nb_appels_llm_war_room": 0,
-        })
+        if mode_preuves == "outils":
+            etat = creer_graphe(
+                memoire, llm, abstention, sur_evenement=transmettre,
+                configuration_war_room=config_debat,
+            ).invoke({
+                "contexte": contexte, "evenements": [], "hypotheses": [],
+                "correctif": None, "enregistrement": None, "resultat_action": resultat,
+                "nb_hypotheses_testees": 0, "nb_ecartees_par_memoire": 0, "nb_appels_llm": 0,
+                "erreur_llm": None,
+                "nb_tours_war_room": 0, "nb_objections": 0,
+                "nb_objections_sans_reponse": 0, "nb_appels_llm_war_room": 0,
+            })
+        else:
+            graphe_sql, ressources = boucle_sql.creer_graphe_sql(
+                memoire, llm, abstention, sur_evenement=transmettre, run_sql=run_sql,
+                fabrique_run_sql=fabrique_run_sql, max_tours=max_tours,
+            )
+            etat = graphe_sql.invoke(boucle_sql.etat_initial_sql(contexte, resultat))
+            fermer_backend = getattr(ressources["run_sql"], "fermer", None)
+            if run_sql is None and callable(fermer_backend):
+                # Backend cree pour cette enquete : on le libere ; un backend injecte reste ouvert.
+                fermer_backend()
+        ecrire_hypotheses = getattr(memoire, "ecrire_hypotheses", None)
+        if callable(ecrire_hypotheses) and etat["hypotheses"]:
+            contexte_valide = etat["contexte"]
+            ecrire_hypotheses(contexte_valide.incident_id, contexte_valide.signature, etat["hypotheses"])
     except Exception:
         if trace_demarre:
             suivi.terminer({"duree_ms": (perf_counter() - debut) * 1000}, "erreur")
@@ -428,7 +465,14 @@ def enqueter(
             nb_objections=etat["nb_objections"],
             nb_objections_sans_reponse=etat["nb_objections_sans_reponse"],
             nb_appels_llm_war_room=etat["nb_appels_llm_war_room"],
+            nb_tours=etat.get("nb_tours", 0),
+            nb_requetes_sql=etat.get("nb_requetes_sql", 0),
+            nb_appels_rapide=etat.get("nb_appels_rapide", 0),
+            nb_appels_profonde=etat.get("nb_appels_profonde", 0),
         ),
+        mode_preuves=mode_preuves,
+        source_preuves=getattr(ressources["run_sql"], "mode", None),
+        requetes_sql=list(etat.get("requetes", {}).values()),
     )
     suivi.terminer(asdict(resultat_enquete.metriques),
                    "abstention" if resultat_enquete.decision_abstention.abstient else "correctif_propose")

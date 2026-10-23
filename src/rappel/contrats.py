@@ -91,3 +91,11 @@ class EvenementEnquete(Contrat):
     acteur: Literal["detective", "sceptique", "historien", "systeme"]
     texte: str
     horodatage: str
+    modele: str | None = None
+    requete_sql: str | None = None
+
+    @model_validator(mode="after")
+    def valider_requete_sql(self) -> Self:
+        if self.type == "preuve" and self.requete_sql is not None and not self.requete_sql.strip():
+            raise ValueError("Une preuve avec requete_sql doit contenir une requete non vide")
+        return self

@@ -266,7 +266,7 @@ def contexte_p1():
 
 
 def lancer_detective(llm, tmp_path):
-    return enqueter(contexte_p1(), MemoireJSON(tmp_path / "memoire.json"), llm, AbstentionSeuil())
+    return enqueter(contexte_p1(), MemoireJSON(tmp_path / "memoire.json"), llm, AbstentionSeuil(), mode_preuves="outils")
 
 
 @pytest.mark.parametrize("enveloppe", [

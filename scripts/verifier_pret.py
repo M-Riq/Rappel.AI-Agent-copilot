@@ -19,7 +19,7 @@ MOTIFS_CLES = (
     re.compile(r"(?:nvapi-|sk-ant-)[A-Za-z0-9_-]{12,}"),
     re.compile(r"\b[A-Za-z0-9_]*(?:KEY|TOKEN)\s*=\s*[\"']?[A-Za-z0-9_-]{24,}", re.IGNORECASE),
 )
-FOURNISSEURS = {"faux", "nvidia", "claude"}
+FOURNISSEURS = {"faux", "nvidia", "claude", "nightshift"}
 
 
 def etat_variable(nom):
@@ -105,7 +105,12 @@ def verifier(racine=RACINE, lancer_git=None, demo=None):
         afficher(f"{nom} : {etat_variable(nom)} ; " + ("reconnu" if reconnu else "ERREUR : fournisseur non reconnu"))
         if not valeur:
             afficher("Defaut : aucun secours" if vide_autorise else "Defaut : fournisseur faux")
-    afficher("\nMeterless : non integre (atelier du 12 oct.).")
+    afficher_rubrique("Meterless Nightshift", ("NIGHTSHIFT_URL", "NIGHTSHIFT_TOKEN",
+                                               "NIGHTSHIFT_VOIE_RAPIDE", "NIGHTSHIFT_VOIE_PROFONDE"))
+    afficher("Ensuite : ./.venv/Scripts/python.exe scripts/check_meterless.py --confirmer")
+    backend = os.getenv("RUN_SQL_BACKEND", "").strip().lower() or "simule"
+    afficher(f"\nRUN_SQL_BACKEND : {backend if backend in {'simule', 'zetaris'} else 'ERREUR : valeur inconnue'}"
+             + (" (preuves simulees SQLite, jamais presentees comme reelles)" if backend == "simule" else ""))
     afficher("\nSecurite du depot :")
     securite = controle_depot(racine, lancer_git)
     if securite["erreur"]:

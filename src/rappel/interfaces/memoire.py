@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Literal, Protocol
+from uuid import uuid4
 
-from ..contrats import EnregistrementMemoire
+from ..contrats import EnregistrementMemoire, Hypothese
 
 
 class Memoire(Protocol):
@@ -20,10 +22,16 @@ class Memoire(Protocol):
         self, signature: str, resultat: Literal["reussi", "echoue"]
     ) -> bool: ...
 
+    def ecrire_hypotheses(
+        self, incident_id: str, signature: str, hypotheses: list[Hypothese]
+    ) -> None: ...
+
 
 class MemoireJSON:
     def __init__(self, chemin: str | Path = "data/memoire.json") -> None:
         self.chemin = Path(chemin)
+        # Table "hypotheses" : fichier JSON separe, a cote du fichier des incidents.
+        self.chemin_hypotheses = self.chemin.with_name(f"{self.chemin.stem}_hypotheses.json")
         self.chemin.parent.mkdir(parents=True, exist_ok=True)
         if not self.chemin.exists():
             self.chemin.write_text("[]\n", encoding="utf-8")
@@ -47,7 +55,34 @@ class MemoireJSON:
     def vider(self) -> int:
         nombre = len(self._lire())
         self.chemin.write_text("[]\n", encoding="utf-8")
+        if self.chemin_hypotheses.exists():
+            self.chemin_hypotheses.write_text("[]\n", encoding="utf-8")
         return nombre
+
+    def lister_hypotheses(self, signature: str | None = None) -> list[dict]:
+        if not self.chemin_hypotheses.exists():
+            return []
+        lignes = json.loads(self.chemin_hypotheses.read_text(encoding="utf-8"))
+        if not isinstance(lignes, list):
+            raise ValueError("Le fichier des hypotheses doit contenir une liste")
+        return [ligne for ligne in lignes if signature is None or ligne.get("signature") == signature]
+
+    def ecrire_hypotheses(
+        self, incident_id: str, signature: str, hypotheses: list[Hypothese]
+    ) -> None:
+        cree_le = datetime.now(timezone.utc).isoformat()
+        lignes = self.lister_hypotheses()
+        for hypothese in hypotheses:
+            hypothese = Hypothese.model_validate(hypothese.model_dump())
+            lignes.append({
+                "id": uuid4().hex, "hypothese_id": hypothese.id, "incident_id": incident_id,
+                "signature": signature, "texte": hypothese.texte, "statut": hypothese.statut,
+                "preuves": hypothese.preuves, "confiance": hypothese.confiance,
+                "raison_rejet": hypothese.raison_rejet, "cree_le": cree_le,
+            })
+        self.chemin_hypotheses.write_text(
+            json.dumps(lignes, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+        )
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         enregistrements = self._lire()

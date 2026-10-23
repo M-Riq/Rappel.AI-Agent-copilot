@@ -35,13 +35,13 @@ class LLMScripte(LLMFaux):
 
 
 def test_stabilite_scriptee_stable():
-    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 5))
+    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 5), mode_preuves="outils")
     assert rapport["verdict"] == "OK" and rapport["identiques"] == 5
     assert rapport["conclusion_majoritaire"][0] == "schema"
 
 
 def test_stabilite_changement_deux_fois():
-    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 3 + ["reseau"] * 2))
+    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 3 + ["reseau"] * 2), mode_preuves="outils")
     assert rapport["verdict"] == "A CORRIGER"
     assert rapport["identiques"] == 3 and rapport["proportion"] == 0.6
     assert len(rapport["distribution"]) == 2
@@ -61,7 +61,7 @@ def test_stabilite_cli_et_json(tmp_path):
 
 
 def test_majorite_exactement_quatre_sur_cinq():
-    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 4 + ["ressources"]))
+    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 4 + ["ressources"]), mode_preuves="outils")
     assert rapport["verdict"] == "OK" and rapport["proportion"] == 0.8
 
 
@@ -141,7 +141,8 @@ def test_demo_erreur_echec_sans_fuite(tmp_path, capsys):
 
 
 def test_proportion_hors_cinq_repetitions():
-    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 8 + ["reseau"] * 2), repetitions=10)
+    rapport = stabilite_p1.mesurer_stabilite(charger(), LLMScripte(["schema"] * 8 + ["reseau"] * 2), repetitions=10,
+                                           mode_preuves="outils")
     assert rapport["verdict"] == "OK" and rapport["identiques"] == 8
 
 
@@ -163,7 +164,7 @@ def test_categorie_retenue_non_schema():
         {"template": "ERROR out of memory", "compte": 50},
         {"template": "ERROR disk full", "compte": 50},
     ]
-    rapport = stabilite_p1.mesurer_stabilite(donnees, LLMScripte(["ressources"] * 5))
+    rapport = stabilite_p1.mesurer_stabilite(donnees, LLMScripte(["ressources"] * 5), mode_preuves="outils")
     assert rapport["verdict"] == "OK"
     assert rapport["conclusion_majoritaire"][0] == "ressources"
     assert not rapport["conclusion_majoritaire"][1]

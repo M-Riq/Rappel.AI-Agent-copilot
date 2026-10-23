@@ -20,6 +20,21 @@ L'instance `app` utilise `creer_llm()` (configuration `.env`), `MemoireJSON()`
 et `AbstentionSeuil()`. Sans `LLM_PROVIDER`, le fournisseur est `faux`.
 Aucun appel LLM n'est fait lors de la creation de l'application.
 
+### Modes de preuve et variables (MVP v4)
+
+`creer_app(..., mode_preuves="sql", fabrique_run_sql=None)` : par defaut, chaque
+enquete utilise la boucle SQL (au plus **6 tours** = 6 appels LLM, voir
+[module-enquete.md](module-enquete.md#2-bis-mode-de-preuves-sql-defaut-mvp-v4)) et un
+backend `run_sql` cree par `creer_run_sql(contexte)` selon `RUN_SQL_BACKEND` :
+
+| Variable | Valeurs |
+|---|---|
+| `RUN_SQL_BACKEND` | vide/`simule` : SQLite en memoire construit depuis le contexte (`simule-sqlite`) ; `zetaris` : reserve au coequipier, **erreur claire « non branche » au demarrage** tant que `RunSqlZetaris` n'existe pas |
+| `LLM_PROVIDER=nightshift` | Meterless Nightshift : `NIGHTSHIFT_URL` (racine avec `/v1`), `NIGHTSHIFT_TOKEN`, `NIGHTSHIFT_VOIE_RAPIDE`, `NIGHTSHIFT_VOIE_PROFONDE` obligatoires, sans valeur par defaut |
+
+`mode_preuves="outils"` conserve l'ancien chemin deterministe (et la war room, hors MVP).
+Contrat des tables pour Zetaris : [run_sql.md](run_sql.md).
+
 Les incidents et decisions sont stockes dans un dictionnaire protege par un
 verrou, sans persistance. Un redemarrage les efface. Utiliser **un seul processus**
 Uvicorn : plusieurs workers auraient des dictionnaires distincts.
@@ -176,7 +191,8 @@ Reponse **200** pendant l'execution :
 { "incident_id": "inc-demo", "statut": "en_cours" }
 ```
 
-Reponse **200** terminee (les chiffres de duree sont illustratifs) :
+Reponse **200** terminee en mode sql (extrait, duree illustrative ; `preuves`
+abregees) :
 
 ```json
 {
@@ -189,12 +205,10 @@ Reponse **200** terminee (les chiffres de duree sont illustratifs) :
       "texte": "Le schema des donnees a change",
       "statut": "retenue",
       "preuves": [
-        "schema: colonne manquante price:float",
-        "schema: nouvelle colonne cost:float",
-        "commits: abc123: rename column price to cost (2026-10-15)",
-        "logs: ERROR column price missing (compte=20)"
+        "q1 [colonnes_attendues, colonnes_observees] 2 ligne(s) : SELECT 'absente' AS ecart, ... LIMIT 50",
+        "q5 [commits] 1 ligne(s) : SELECT hash, message, date FROM commits WHERE ... LIMIT 50"
       ],
-      "confiance": 0.95,
+      "confiance": 0.9,
       "raison_rejet": null
     },
     {
@@ -204,34 +218,16 @@ Reponse **200** terminee (les chiffres de duree sont illustratifs) :
       "statut": "refutee",
       "preuves": [],
       "confiance": 0.0,
-      "raison_rejet": "Aucune preuve fournie par l'outil"
-    },
-    {
-      "id": "inc-demo:hyp-3",
-      "incident_id": "inc-demo",
-      "texte": "Probleme reseau ou timeout",
-      "statut": "refutee",
-      "preuves": [],
-      "confiance": 0.0,
-      "raison_rejet": "Aucune preuve fournie par l'outil"
-    },
-    {
-      "id": "inc-demo:hyp-4",
-      "incident_id": "inc-demo",
-      "texte": "Changement de configuration",
-      "statut": "refutee",
-      "preuves": [],
-      "confiance": 0.0,
-      "raison_rejet": "Aucune preuve fournie par l'outil"
+      "raison_rejet": "requetes sans resultat"
     }
   ],
   "correctif": {
     "description": "Restaurer le schema attendu de pipeline_demo: id:int, price:float",
-    "patch": "{\"composant\":\"pipeline_demo\",\"avant\":[\"id:int\",\"cost:float\"],\"apres\":[\"id:int\",\"price:float\"]}",
+    "patch": "{\n  \"composant\": \"pipeline_demo\", \"avant\": [...], \"apres\": [...]\n}",
     "niveau_risque": "validation",
     "elements_touches": ["pipeline_demo"],
     "reversible": true,
-    "justification": "colonne renommee probable: schema: colonne manquante price:float; schema: nouvelle colonne cost:float",
+    "justification": "colonne renommée (price -> cost): schema: colonne manquante price:float; schema: nouvelle colonne cost:float (requetes q1, q5)",
     "confiance": 1.0
   },
   "decision_abstention": {
@@ -240,17 +236,35 @@ Reponse **200** terminee (les chiffres de duree sont illustratifs) :
     "manque": ["incident similaire en mémoire"]
   },
   "metriques": {
-    "nb_evenements": 13,
+    "nb_evenements": 21,
     "nb_hypotheses_testees": 4,
     "nb_ecartees_par_memoire": 0,
-    "nb_appels_llm": 1,
+    "nb_appels_llm": 5,
     "duree_ms": 20.0,
     "nb_tokens_entree": 0,
-    "nb_tokens_sortie": 0
+    "nb_tokens_sortie": 0,
+    "nb_tours_war_room": 0,
+    "nb_objections": 0,
+    "nb_objections_sans_reponse": 0,
+    "nb_appels_llm_war_room": 0,
+    "nb_tours": 5,
+    "nb_requetes_sql": 5,
+    "nb_appels_rapide": 3,
+    "nb_appels_profonde": 2
   },
-  "decision_humaine": null
+  "decision_humaine": null,
+  "mode_preuves": "sql",
+  "source_preuves": "simule-sqlite",
+  "preuves_simulees": true
 }
 ```
+
+`source_preuves` donne le mode du backend (`simule-sqlite`, plus tard `zetaris`) ;
+`preuves_simulees` vaut `true` pour tout backend simule : **une preuve simulee
+n'est jamais presentee comme reelle**. En mode outils : `mode_preuves="outils"`,
+`source_preuves=null`, `preuves_simulees=false`. Si le plafond de 6 tours est
+atteint avant la conclusion, la reponse est une abstention dont `manque` contient
+« plafond de 6 tours atteint avant la conclusion ».
 
 En cas d'abstention, `correctif` vaut `null` et `decision_abstention.abstient`
 vaut `true`. Les metriques sont celles de l'enquete : elles n'incluent pas les
@@ -280,11 +294,29 @@ lecture partielle :
     "etape": 1,
     "type": "decision",
     "acteur": "systeme",
-    "texte": "Contexte valide, enquete ouverte",
-    "horodatage": "2026-10-15T10:42:00+00:00"
+    "texte": "Contexte valide, enquete ouverte (preuves SQL : simule-sqlite)",
+    "horodatage": "2026-10-15T10:42:00+00:00",
+    "modele": null,
+    "requete_sql": null
+  },
+  {
+    "incident_id": "inc-demo",
+    "etape": 4,
+    "type": "preuve",
+    "acteur": "detective",
+    "texte": "q1 [simule-sqlite] Le schema des donnees a change : 2 ligne(s) ; ...",
+    "horodatage": "2026-10-15T10:42:03+00:00",
+    "modele": "faux-rapide",
+    "requete_sql": "SELECT 'absente' AS ecart, ... LIMIT 50"
   }
 ]
 ```
+
+Champs ajoutes (optionnels, `null` par defaut) : `modele` = modele **renvoye** par
+le service pour les evenements issus d'un appel LLM (hypotheses, preuves, verdicts,
+cause, correctif) ; `requete_sql` = SQL reellement execute, porte par les `preuve`
+(et par un `rejet` de requete executee en erreur). Une `preuve` avec `requete_sql`
+renseigne ne peut pas avoir une requete vide ou blanche.
 
 `apres` vaut `0` par defaut et doit etre positif ou nul. Seules les etapes
 strictement superieures sont renvoyees, dans l'ordre. L'interface peut sonder
@@ -344,6 +376,13 @@ Sans corps. Reponse **200** :
 ```
 
 Cette route verifie l'API, pas la disponibilite du fournisseur LLM.
+
+## Limites connues (MVP v4)
+
+- Meterless Nightshift et Zetaris **non testes en reel** : tests hors reseau
+  (`httpx.MockTransport`, SQLite simule). Lancer `scripts/check_meterless.py --confirmer`
+  pour verifier URL, voies et modele reellement repondu.
+- `RUN_SQL_BACKEND=zetaris` echoue tant que la classe du coequipier n'existe pas.
 
 ## Injection pour Juan, Riq et Action
 

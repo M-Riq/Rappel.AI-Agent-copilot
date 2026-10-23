@@ -3,7 +3,8 @@
 ## 1. Role en cinq lignes
 
 1. Recevoir un contexte d'incident valide, sans assurer son ingestion.
-2. Faire proposer des hypotheses par le LLM et rechercher leurs indices avec des outils deterministes.
+2. Faire proposer des hypotheses par le LLM et les mettre a l'epreuve par des requetes SQL
+   executees par le code (`mode_preuves="sql"`, defaut) ou par des outils deterministes (`"outils"`).
 3. Utiliser la memoire de meme signature pour eviter des pistes deja refutees et rappeler des correctifs passes.
 4. Rendre un correctif a valider ou une abstention, avec evenements et metriques.
 5. Exposer ces resultats au CLI et a l'API, sans executer de correction reelle par defaut.
@@ -20,12 +21,19 @@ enqueter(
     war_room_active=None, war_room_max_tours=None,
     war_room_max_appels_llm=None,
     traceur=None,
+    mode_preuves="sql",          # "sql" (defaut, MVP v4) ou "outils" (ancien chemin deterministe)
+    run_sql=None,                # RunSql injecte ; sinon creer_run_sql(contexte) selon RUN_SQL_BACKEND
+    max_tours=None,              # plafond d'appels LLM du mode sql, 6 par defaut
+    fabrique_run_sql=None,       # fabrique (contexte -> RunSql), utilisee par l'API
 )
 ```
 
 `contexte` est un `ContexteIncident` ou un dictionnaire valide. `ResultatEnquete`
 contient `hypotheses`, `evenements`, `correctif`, `decision_abstention`,
-`enregistrement`, `metriques`. Correctif et enregistrement peuvent valoir `None`.
+`enregistrement`, `metriques`, `mode_preuves`, `source_preuves` (mode du backend
+SQL : `simule-sqlite`, `zetaris` ; `None` en mode outils) et `requetes_sql` (requetes
+proposees avec SQL execute, resultat ou erreur). Correctif et enregistrement peuvent valoir `None`.
+Le graphe ci-dessous est celui du mode `outils` ; le mode `sql` est decrit en section 2 bis.
 Il n'y a pas d'interface source/ingestion dans ce module.
 
 ```text
@@ -60,6 +68,108 @@ Une etape vaut `len(evenements) + 1`, l'horodatage est genere en UTC ISO.
 dans l'ordre. Une exception du callback interrompt l'enquete.
 `ecrire_evenements_jsonl(evenements, chemin)` cree les parents et ecrit une ligne
 JSON par evenement ; la fonction n'impose ni dossier ni extension.
+
+### 2 bis. Mode de preuves SQL (defaut, MVP v4)
+
+Sources : [boucle_sql.py](../src/rappel/enquete/boucle_sql.py),
+[run_sql.py](../src/rappel/interfaces/run_sql.py) (contrat backend : [run_sql.md](run_sql.md)).
+Principe : **le LLM propose, le code verifie**. Un tour = un appel LLM, plafond
+`MAX_TOURS = 6` (`max_tours`). La war room (hors MVP) n'existe qu'en mode `outils`.
+
+```text
+START -> charger_contexte -> consulter_memoire -> proposer_hypotheses -> juger
+      -> evaluer_confiance
+           | abstient -> abstention -> END
+           | sinon    -> conclure -> (correctif ? ecrire_memoire : abstention) -> END
+```
+
+| Etape | Voie / role | Ce que fait le code |
+| --- | --- | --- |
+| `proposer_hypotheses` | rapide, `hypotheses` | Prompt : signature, resume du contexte, description de run_sql, `TABLES`, 4 requetes types, hypotheses deja refutees a ne pas reproposer. Reponse : au moins 2 objets `{texte, sql, categorie?}`. Les textes deja refutes sont ecartes (`rejet`), chaque SQL est valide puis execute (`preuve`, identifiant `q1`, `q2`...). |
+| `juger` | rapide, `verdict` | Le modele recoit les resultats (10 lignes max par requete) et rend `{verdicts: [{id, statut, requetes_citees, raison}], requetes_suivi}` ; au plus `MAX_REQUETES_SUIVI = 2` requetes de suivi, chaque relance de verdict coute un tour. |
+| validation par le code | aucun appel | Retenue seulement si le verdict cite une requete **de cette hypothese**, executee, sans erreur et a resultat non vide ; sinon `refutee` avec `raison_rejet = "aucune preuve SQL"`. Une seule retenue : la plus etayee (egalite : premiere). |
+| `evaluer_confiance` | aucun appel | `abstention.decider(retenue, nb_sources, incident_similaire)` avec `nb_sources` = tables distinctes des requetes citees a resultat non vide et `incident_similaire` = la memoire a repondu. |
+| `conclure` | profonde, `conclusion` puis `correctif` | Cause confirmee puis `CorrectifPropose` valide par Pydantic, `niveau_risque="validation"` impose, confiance <= celle du code, justification completee par les identifiants de requetes s'ils manquent. Si la memoire contient un correctif `reussi` pour la signature, un seul appel `correctif` renvoie aussi `cause_confirmee` (economie d'un appel profond). |
+
+Confiance initiale (constante nommee `CONFIANCE_PAR_REQUETE_NON_VIDE`) :
+
+```text
+c_initiale = min(CONFIANCE_MAX = 0.95, 0.45 x nombre de requetes citees a resultat non vide)
+c_finale   = formule inchangee de AbstentionSeuil (seuil 0,6, +0,1 si nb_sources >= 2, +0,1 si incident similaire)
+```
+
+Plafond : si `max_tours` est atteint avant la conclusion, evenement `decision`
+« Plafond de N tours atteint : appel ... non effectue, abstention sans correctif »
+(N = valeur reelle), puis abstention dont `manque` contient
+« plafond de N tours atteint avant la conclusion ». Reponse JSON invalide : une
+relance (qui coute un tour), puis abstention propre.
+
+Evenements : un `EvenementEnquete` par etape. `modele` = `derniere_reponse_info["modele_repondu"]`
+(valeur renvoyee par le service) pour les evenements issus d'un appel LLM
+(hypotheses, preuves, verdicts, cause, correctif), `None` sinon. Les `preuve`
+portent `requete_sql` = SQL reellement execute (apres normalisation, `LIMIT 50` compris)
+et leur texte indique le mode du backend (`[simule-sqlite]`) : une preuve simulee n'est
+jamais presentee comme reelle. Les SQL refuses donnent un `rejet` sans `requete_sql`
+(rien n'est execute) ; un SQL execute en erreur donne un `rejet` avec `requete_sql`.
+Acteurs : `detective` pour hypotheses et preuves, `systeme` pour le reste.
+
+#### Calibration de l'abstention (mode sql, LLM faux)
+
+Mesure AVANT modification, avec la constante 0,3 heritee du mode outils
+(`min(0.95, 0.3 x preuves)`), seuil et formule inchanges :
+
+| Scenario | Hypothese retenue | Requetes non vides citees | Confiance initiale | Tables (nb_sources) | Incident similaire | Confiance finale | Decision |
+|---|---|---|---|---|---|---|---|
+| P1 | Le schema des donnees a change | 2 | 0.60 | 3 | False | 0.70 | correctif |
+| P2 | Le schema des donnees a change | 1 | 0.30 | 2 | True | 0.50 | **abstention (a tort)** |
+| P3 | - | 0 | 0.00 | 0 | - | 0.00 | abstention |
+| P1 + bruit (3 logs) | Le schema des donnees a change | 2 | 0.60 | 3 | False | 0.70 | correctif |
+| P3 + log sans rapport | - | 0 | 0.00 | 0 | - | 0.00 | abstention |
+| P3 + indice faible unique | Probleme reseau ou timeout | 1 | 0.30 | 1 | False | 0.30 | abstention |
+
+APRES (`CONFIANCE_PAR_REQUETE_NON_VIDE = 0.45`) :
+
+| Scenario | Hypothese retenue | Requetes non vides citees | Confiance initiale | Tables (nb_sources) | Incident similaire | Confiance finale | Decision |
+|---|---|---|---|---|---|---|---|
+| P1 | Le schema des donnees a change | 2 | 0.90 | 3 | False | 1.00 | correctif |
+| P2 | Le schema des donnees a change | 1 | 0.45 | 2 | True | 0.65 | correctif |
+| P3 | - | 0 | 0.00 | 0 | - | 0.00 | abstention |
+| P1 + bruit (3 logs) | Le schema des donnees a change | 2 | 0.90 | 3 | False | 1.00 | correctif |
+| P3 + log sans rapport | - | 0 | 0.00 | 0 | - | 0.00 | abstention |
+| P3 + indice faible unique | Probleme reseau ou timeout | 1 | 0.45 | 1 | False | 0.45 | abstention |
+
+Propriete retenue : une requete non vide seule, sans memoire, reste sous 0,6
+(0,45 + 0,1 au plus) ; il faut une corroboration (seconde requete) ou un incident
+similaire. Tests : [test_calibration_sql.py](../tests/test_calibration_sql.py).
+
+#### Metriques P1 / P2 / P3 (demo, LLM faux, memoire partagee P1->P2)
+
+| Scenario | Evenements | Hypotheses testees | Ecartees memoire | Appels LLM | Tours | Requetes SQL | Rapide/profonde | Decision |
+|---|---|---|---|---|---|---|---|---|
+| P1 | 21 | 4 | 0 | 5 | 5 | 5 | 3/2 | correctif propose |
+| P2 | 12 | 1 | 3 | 3 | 3 | 1 | 2/1 | correctif propose |
+| P3 | 17 | 4 | 0 | 2 | 2 | 4 | 2/0 | abstention |
+
+P2/P1 : evenements 57 %, appels LLM 60 % (critere <= 60 %).
+
+#### Fil d'evenements P1 (mode sql, extrait de [evenements_p1.json](../fixtures/evenements_p1.json))
+
+```text
+01 decision  systeme   -            Contexte valide, enquete ouverte (preuves SQL : simule-sqlite)
+02 decision  systeme   -            aucun incident similaire
+03 hypothese detective faux-rapide  Le schema des donnees a change
+04 preuve    detective faux-rapide  q1 [simule-sqlite] ... 2 ligne(s) ; apercu [["absente","amount",...],["nouvelle","total",...]]
+05-10        hypotheses ressources / reseau / configuration et leurs preuves q2-q4 : 0 ligne
+11 decision  systeme   faux-rapide  Verdict provisoire (tour 2) : 1 requete(s) de suivi demandee(s)
+12 preuve    detective faux-rapide  q5 [simule-sqlite] ... 1 ligne(s) ; commit "rename output column amount to total"
+13 decision  systeme   faux-rapide  Verdict du modele (tour 3) : hyp-1 retenue ['q1', 'q5'] ; hyp-2..4 refutee
+14 decision  systeme   -            Hypothese retenue par le code : ... (preuves SQL : q1, q5 ; confiance initiale 0.90)
+15-17 rejet  systeme   -            ressources / reseau / configuration : refutee (requetes sans resultat)
+18 decision  systeme   -            Confiance 1.00; abstention=False; tables a preuve non vide : [colonnes_attendues, colonnes_observees, commits]
+19 decision  systeme   faux-profond Cause confirmee : colonne renommée (amount -> total)
+20 decision  systeme   faux-profond Correctif propose pour validation: Restaurer le schema attendu de orders_etl: id:int, amount:float
+21 decision  systeme   -            Resultat provisoire enregistre en memoire
+```
 
 ### Tracage optionnel (A14)
 
@@ -110,7 +220,10 @@ seule classe, sans deviner les noms du SDK.
 `MetriquesEnquete` contient `nb_evenements`, `nb_hypotheses_testees`,
 `nb_ecartees_par_memoire`, `nb_appels_llm`, `duree_ms`, `nb_tokens_entree`,
 `nb_tokens_sortie`, `nb_tours_war_room`, `nb_objections`,
-`nb_objections_sans_reponse`, `nb_appels_llm_war_room`.
+`nb_objections_sans_reponse`, `nb_appels_llm_war_room`, et pour le mode sql
+`nb_tours` (appels LLM du graphe, relances comprises), `nb_requetes_sql`
+(requetes transmises a run_sql), `nb_appels_rapide`, `nb_appels_profonde`
+(comptes par le graphe selon `voie_pour_role`). Ces quatre champs valent 0 en mode outils.
 Les hypotheses testees sont les passages effectifs dans les outils ; les candidats
 ecartes sont comptes lors du filtrage memoire. Les appels/tokens sont des differences
 d'usage fournisseur ; sans compteur d'appels disponible, le graphe utilise le sien.
@@ -125,14 +238,18 @@ Depuis la racine du depot, dans Git Bash, avec le venv Python 3.11.9 :
 ```bash
 ./.venv/Scripts/python.exe -m pytest
 LLM_PROVIDER=faux LLM_FALLBACK= ./.venv/Scripts/python.exe scripts/demo_enquete.py
-LLM_PROVIDER=faux LLM_FALLBACK= ./.venv/Scripts/python.exe scripts/demo_enquete.py --war-room --json data/demo.json
+LLM_PROVIDER=faux LLM_FALLBACK= ./.venv/Scripts/python.exe scripts/demo_enquete.py --mode outils --war-room --json data/demo.json
+./.venv/Scripts/python.exe scripts/stabilite_p1.py               # mode sql par defaut, --mode outils possible
+./.venv/Scripts/python.exe scripts/check_meterless.py --confirmer # appels reels Nightshift
 ./.venv/Scripts/python.exe -m uvicorn src.rappel.api:app --host 127.0.0.1 --port 8000
 ```
 
 La demo ne lance pas de serveur. P1/P2 partagent une memoire temporaire vide et
 P3 en utilise une autre vide. Code `0` si P1/P2 concluent et P3 s'abstient sans
-correctif, sinon `1`. Sans `--war-room`, le debat est explicitement desactive,
-meme si l'environnement l'active.
+correctif, sinon `1`. La demo et l'API utilisent le mode `sql` avec `RunSqlSQLite`
+par defaut ; le tableau affiche `Tours`, `Requetes SQL`, `Appels rapide/profonde` et
+`Source preuves` (`simule-sqlite (SIMULE)`). `--war-room` n'a d'effet qu'avec
+`--mode outils` ; sans lui, le debat est explicitement desactive.
 API interactive : http://127.0.0.1:8000/docs ; aussi `/redoc` et `/openapi.json`.
 Voir [api.md](api.md) pour les routes, les corps et les reponses.
 L'identifiant des routes de correctif est aussi l'identifiant d'incident.
@@ -172,7 +289,7 @@ deja present a priorite. War room lit `os.environ` et ne charge pas `.env` seule
 
 | Nom                       | Role                                                 | Defaut reel                                   |
 | ------------------------- | ---------------------------------------------------- | --------------------------------------------- |
-| `LLM_PROVIDER`            | `faux`, `nvidia` ou `claude`                         | `faux`, aussi si vide                         |
+| `LLM_PROVIDER`            | `faux`, `nvidia`, `claude` ou `nightshift`           | `faux`, aussi si vide                         |
 | `LLM_FALLBACK`            | Secours sur `LLMIndisponible`                        | Aucun, chaine vide                            |
 | `NVIDIA_API_KEY`          | Authentification NVIDIA                              | Aucun ; obligatoire pour NVIDIA               |
 | `NVIDIA_BASE_URL`         | Racine HTTP, suffixee par `/chat/completions`        | `https://integrate.api.nvidia.com/v1`         |
@@ -190,6 +307,11 @@ deja present a priorite. War room lit `os.environ` et ne charge pas `.env` seule
 | `LANGFUSE_SECRET_KEY` | Cle secrete pour la factory du traceur optionnel | Vide ; jamais affichee |
 | `LANGFUSE_HOST` | Hote a transmettre au futur adaptateur SDK | Vide ; aucun hote distant choisi par ce code |
 | `LANGFUSE_ENVOYER_TEXTES` | Envoyer les textes des evenements ; `0` les retire | `1` ; une valeur vide conserve l'envoi |
+| `NIGHTSHIFT_URL` | Racine de l'API Meterless Nightshift compatible OpenAI, **avec `/v1`** (`/chat/completions`, `/models`) | Aucun ; obligatoire pour `nightshift` |
+| `NIGHTSHIFT_TOKEN` | Jeton Bearer Nightshift, jamais affiche ni journalise | Aucun ; obligatoire |
+| `NIGHTSHIFT_VOIE_RAPIDE` | Identifiant de modele/voie rapide (Nemotron Lightning) : roles `detective`, `hypotheses`, `verdict` et tout autre role | Aucun (valeur de la console Nightshift) ; obligatoire |
+| `NIGHTSHIFT_VOIE_PROFONDE` | Identifiant de modele/voie profonde (Nemotron Super) : roles `conclusion`, `correctif` | Aucun (valeur de la console Nightshift) ; obligatoire |
+| `RUN_SQL_BACKEND` | Backend des preuves SQL : `simule` (SQLite en memoire) ou `zetaris` | `simule` ; `zetaris` leve « non branche » tant que `RunSqlZetaris` n'existe pas |
 
 Les parametres war room d'`enqueter` surchargent ces trois variables. Elles sont
 presentes dans `.env.example`, toutes avec une valeur vide ; les defauts sont
@@ -202,8 +324,8 @@ L'URL Anthropic et `anthropic-version=2023-06-01` sont constantes de l'adaptateu
 
 ### Memoire, par exemple un futur adaptateur Meterless
 
-Le Protocol de [memoire.py](../src/rappel/interfaces/memoire.py) a les six
-methodes ci-dessous. Signature et textes refutes se comparent exactement.
+Le Protocol de [memoire.py](../src/rappel/interfaces/memoire.py) a les sept
+methodes ci-dessous (`ecrire_hypotheses` ajoutee pour le MVP v4). Signature et textes refutes se comparent exactement.
 La mise a jour cible le dernier souvenir de la signature et retourne `False`
 s'il n'existe pas. Meterless n'est pas integre : ce squelette ne suppose aucune
 API externe et n'est pas une implementation utilisable telle quelle.
@@ -238,7 +360,38 @@ class MemoireExterne:
         self, signature: str, resultat: Literal["reussi", "echoue"]
     ) -> bool:
         raise NotImplementedError("Mettre a jour le dernier souvenir correspondant")
+
+    def ecrire_hypotheses(self, incident_id: str, signature: str, hypotheses: list[Hypothese]) -> None:
+        raise NotImplementedError("Une ligne par hypothese dans la table hypotheses")
 ```
+
+La boucle appelle `ecrire_hypotheses` apres chaque enquete (deux modes, abstention
+comprise, si au moins une hypothese existe). `MemoireJSON` ecrit un fichier separe
+`<nom>_hypotheses.json` a cote du fichier des incidents ; `vider()` le remet a vide ;
+`lister_hypotheses(signature=None)` relit les lignes (hors Protocol).
+
+#### Correspondance avec les tables Postgres (coequipier)
+
+| Table Postgres | Colonne | Source Python | Note |
+| --- | --- | --- | --- |
+| `memoire_incidents` | `signature` | `EnregistrementMemoire.signature` | index ; `chercher` = egalite exacte, ordre d'ecriture |
+| | `cause_confirmee` | `.cause_confirmee` | justification du correctif (comportement inchange) |
+| | `hypotheses_refutees` | `.hypotheses_refutees` | JSON (liste de textes) ; `hypotheses_refutees(signature)` = union ordonnee sans doublon |
+| | `correctif_essaye` | `.correctif_essaye` | |
+| | `resultat` | `.resultat` | `reussi`/`echoue` ; `mettre_a_jour_resultat` modifie la derniere ligne de la signature |
+| | `date` | `.date` | ISO 8601 |
+| `hypotheses` | `id` | genere (`uuid4().hex` en JSON) | cle primaire |
+| | `incident_id` | argument `incident_id` | |
+| | `signature` | argument `signature` | index |
+| | `texte` | `Hypothese.texte` | |
+| | `statut` | `Hypothese.statut` | `ouverte`/`retenue`/`refutee` (`ouverte` si plafond atteint avant le verdict) |
+| | `preuves` | `Hypothese.preuves` | JSON : `"qN [tables] n ligne(s) : SQL execute"` |
+| | `confiance` | `Hypothese.confiance` | 0..1 |
+| | `raison_rejet` | `Hypothese.raison_rejet` | ex. `aucune preuve SQL` |
+| | `cree_le` | horodatage UTC d'ecriture | |
+
+Le fichier JSON ajoute `hypothese_id` (identifiant interne `incident:hyp-N`),
+absent du cahier : colonne optionnelle cote Postgres. `vider()` doit vider les deux tables.
 
 `MemoireJSON(chemin="data/memoire.json")` cree dossier/fichier automatiquement,
 valide a la lecture, ajoute des souvenirs et fusionne les refutations sans doublon
@@ -252,6 +405,19 @@ L'API appelle ces methodes obligatoires sans detection optionnelle de leur prese
 
 Protocol exact de [llm.py](../src/rappel/interfaces/llm.py) : attribut
 `usage: UsageLLM`, methode `completer(prompt: str, role: str = "detective") -> str`.
+Optionnel mais lu par le mode sql : `derniere_reponse_info`
+(`{"voie", "modele_demande", "modele_repondu", "tokens_entree", "tokens_sortie"}`),
+ou `modele_repondu` est le champ `model` **renvoye** par le service (sinon `None`).
+
+`LLMNightshift` (Meterless Nightshift) reutilise le chemin HTTP compatible OpenAI
+de NVIDIA (`_AdaptateurOpenAI`) : `completer(prompt, role="detective", tools=None)`
+choisit la voie avec `voie_pour_role` (`conclusion`/`correctif` -> profonde, tout le
+reste -> rapide), n'ajoute `tools` au corps que s'il est fourni, et tient
+`usage.par_voie["rapide"|"profonde"]` (appels et tokens). `lister_modeles()` lit
+`GET /models` sans consommer le budget. `LLMFaux` repond de facon deterministe aux roles
+`hypotheses`, `verdict`, `conclusion`, `correctif` (donnees JSON apres `MARQUEUR_DONNEES`)
+avec `modele_repondu` = `faux-rapide`/`faux-profond` ; les anciens roles sont inchanges.
+`LLMAvecSecours` recopie `derniere_reponse_info` du fournisseur qui a repondu.
 Les roles sont encodes dans le contenu HTTP, pas utilises directement comme roles
 OpenAI. Le fournisseur retourne du texte et compte les requetes physiques ; les
 tokens inconnus restent `None`.
@@ -438,33 +604,46 @@ un identifiant d'incident.
 - Tracage optionnel teste par injection seulement : liaison au SDK Langfuse reel
   non branchee. Les textes sont envoyes par defaut au client injecte sans filtre
   de secrets ; choisir `LANGFUSE_ENVOYER_TEXTES=0` pour ne pas les transmettre.
-- Pas d'integration Meterless ni d'ingestion dans ce module.
+- **Meterless Nightshift non teste en reel** : format exact de `NIGHTSHIFT_URL`
+  (racine avec `/v1`), identifiants des voies, presence du champ `model` et des
+  `usage.prompt_tokens/completion_tokens`, comportement avec `tools` et routage
+  automatique eventuel vers un autre modele : a verifier avec
+  `scripts/check_meterless.py --confirmer`.
+- **Zetaris non branche** : les preuves SQL sont simulees (SQLite en memoire construit
+  depuis le contexte, mode `simule-sqlite`, affiche partout). `RUN_SQL_BACKEND=zetaris`
+  echoue explicitement tant que `RunSqlZetaris` n'existe pas. Voir [run_sql.md](run_sql.md).
+- Les reponses du LLM faux sont deduites des resultats SQL et du resume de contexte,
+  sans valeur de scenario ; elles ne garantissent pas le comportement d'un vrai modele.
+- La fusion conclusion + correctif repose sur l'existence d'un correctif `reussi`
+  de meme signature ; la cause reste deduite des preuves SQL du nouvel incident.
+- Pas d'ingestion dans ce module.
   L'avertissement Pydantic sur le champ partage `schema` est connu ; le nom est conserve.
 
-## 8. Checklist A1 a A15
+## 8. Checklist A1 a A15 (cahier MVP v4)
 
+Le texte exact du cahier MVP v4 n'est pas dans le depot : A1-A6 reprennent les
+definitions du prompt MVP v4 (mode sql), A7-A15 la numerotation precedente.
 Le statut concerne les tests presents, pas une certification en production.
 
-| Case | Etat                                   | Preuve dans les tests                                                                                                                                                            |
-| ---- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1   | Fait                                   | Hypotheses/statuts : [test_enquete.py](../tests/test_enquete.py), `test_a1_hypotheses`                                                                                           |
-| A2   | Fait                                   | Retenue avec preuves non vides : `test_a2_preuves_retenues`                                                                                                                      |
-| A3   | Fait                                   | Evenements valides, etapes croissantes, callback : `test_a3_evenements` et voisin                                                                                                |
-| A4   | Fait                                   | Correctif valide, justification de renommage : `test_a4_correctif`                                                                                                               |
-| A5   | Fait                                   | Souvenir avec refutations : `test_a5_memoire`                                                                                                                                    |
-| A6   | Fait                                   | Refutees non retestees, outils espionnes : [test_memoire_influence.py](../tests/test_memoire_influence.py), `test_a6_refutees_non_testees`                                       |
-| A7   | Fait, critere revise                   | Hypotheses testees du second incident <= 60 % du premier ; ratio d'evenements seulement informatif                                                                               |
-| A8   | Fait                                   | Memoire contraire change la decision : `test_a8_memoire_contraire`                                                                                                               |
-| A9   | Fait                                   | Incident ambigu : abstention/manque/aucun correctif : [test_abstention_calibration.py](../tests/test_abstention_calibration.py), `test_a9_incident_ambigu`                       |
-| A10  | Fait                                   | Trois decisions attendues, bruit/indice faible/egalite au seuil : `test_a10_decisions_dans_un_meme_parcours` et voisins                                                          |
-| A11  | Fait                                   | Trois acteurs, evenements et plafonds locaux/globaux : [test_war_room.py](../tests/test_war_room.py)                                                                             |
-| A12  | Fait                                   | Debat desactive identique au graphe sans noeud, temps fixes pour comparaison : `test_a12_identique_au_graphe_sans_noeud`                                                         |
-| A13  | Fait en simulation ; reel a faire      | Factory, formats HTTP, usage, erreurs et secours : [test_llm_fournisseurs.py](../tests/test_llm_fournisseurs.py)                                                                 |
-| A14 | Code pret, activation avec les cles, liaison au SDK a verifier | Cycle debut/evenements/fin, absence de fuite dans les erreurs et non-regression testes avec client injecte dans [test_traceur.py](../tests/test_traceur.py). Adaptateur SDK non branche : aucune trace distante garantie. |
-| A15  | A faire ; non mesure                   | P1 rejouee 5 fois avec un vrai LLM doit donner la meme conclusion au moins 4 fois sur 5. Necessite une cle et une mesure reelle ; les tests factices ne valident pas ce critere. |
+| Case | Etat | Preuve dans les tests |
+| ---- | ---- | --------------------- |
+| A1 | Fait (sql + outils) | P1 : au moins 2 hypotheses avec statut : [test_enquete_sql.py](../tests/test_enquete_sql.py) `test_a1_...` ; outils : `test_a1_hypotheses` |
+| A2 | Fait | Toute retenue cite une requete executee a resultat non vide, rejouee independamment : `test_a2_...` ; verdict mensonger refute : `test_verdict_mensonger_refute_par_le_code` |
+| A3 | Fait | Chaque `preuve` porte le SQL reellement execute (espion run_sql) : `test_a3_...` ; SQL dangereux refuse sans execution : `test_sql_dangereux_refuse_sans_execution` |
+| A4 | Fait | Evenements valides, etapes croissantes, `modele` reel par evenement LLM : `test_a4_...`, `test_nightshift_simule_modele_reel_dans_les_evenements` |
+| A5 | Fait | P1 conclut « colonne renommée », correctif Pydantic valide, patch avant/apres : `test_a5_...` |
+| A6 | Fait | Plafond de tours : message « Plafond de N tours atteint », abstention sans correctif : `test_a6_plafond_de_tours` |
+| A7 | Fait | P2 apres P1 : evenements et appels LLM <= 60 %, aucune refutee retestee : `test_p2_apres_p1_economie_et_aucun_retest` |
+| A8 | Fait | Memoire contraire : aucun correctif de schema : `test_memoire_contraire_aucun_correctif_de_schema` |
+| A9 | Fait | P3 : abstention, aucun correctif, elements manquants listes : `test_p3_abstention_elements_manquants` |
+| A10 | Fait | Calibration P1/P2/P3 + bruit + indice faible unique : [test_calibration_sql.py](../tests/test_calibration_sql.py) |
+| A11 | Fait (mode outils seulement) | War room hors MVP, conservee et testee : [test_war_room.py](../tests/test_war_room.py) |
+| A12 | Fait | Mode outils identique a l'ancien comportement (anciens tests verts avec `mode_preuves="outils"`) |
+| A13 | Fait en simulation ; reel a faire | Nightshift (voies, `model` renvoye, compteurs, plafond, secours, non-fuite) : [test_llm_nightshift.py](../tests/test_llm_nightshift.py) ; appel reel : `check_meterless.py --confirmer` a lancer |
+| A14 | Code pret, liaison SDK a verifier | Traceur par injection : [test_traceur.py](../tests/test_traceur.py) ; aucune trace distante garantie |
+| A15 | Mecanisme fait ; mesure reelle a faire | `stabilite_p1.py` en mode sql (triplet inchange) : 5/5 avec LLM faux ; a mesurer avec Nightshift reel |
+| run_sql | Fait (simule) ; Zetaris a faire | Garde-fous, troncature, erreurs, SQL execute : [test_run_sql.py](../tests/test_run_sql.py) |
 
 [test_api.py](../tests/test_api.py), [test_scripts_essai.py](../tests/test_scripts_essai.py)
 et [test_demo_enquete.py](../tests/test_demo_enquete.py) ajoutent des validations
-d'integration locale, de confirmation de cout et d'export. Les tests du traceur
-valident A14 par injection, pas l'envoi effectif au service Langfuse. La stabilite
-avec un vrai LLM d'A15 reste non mesuree.
+d'integration locale, de confirmation de cout et d'export.

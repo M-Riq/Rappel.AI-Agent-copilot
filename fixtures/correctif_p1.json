@@ -6,6 +6,6 @@
     "orders_etl"
   ],
   "reversible": true,
-  "justification": "colonne renommee probable: schema: colonne manquante amount:float; schema: nouvelle colonne total:float",
+  "justification": "colonne renommée (amount -> total): schema: colonne manquante amount:float; schema: nouvelle colonne total:float (requetes q1, q5)",
   "confiance": 1.0
 }

@@ -47,7 +47,7 @@ def test_code_un_si_ambigu_conclut(capsys):
     donnees = contextes["P3"].model_dump()
     donnees["schema"] = {"attendu": ["ancien:int"], "observe": ["nouveau:int"]}
     contextes["P3"] = donnees
-    assert demo_enquete.main([], fabrique_llm=LLMFaux, contextes=contextes) == 1
+    assert demo_enquete.main(["--mode", "outils"], fabrique_llm=LLMFaux, contextes=contextes) == 1
     sortie = capsys.readouterr().out
     assert "ECHEC" in sortie and "P3 doit s'abstenir" in sortie
 

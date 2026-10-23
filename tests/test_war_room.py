@@ -27,6 +27,7 @@ def lancer(tmp_path, contexte=None, llm=None, **options):
     return enqueter(
         contexte if contexte is not None else charger(),
         MemoireJSON(tmp_path / "memoire.json"), llm or LLMFaux(), AbstentionSeuil(), **options,
+        mode_preuves="outils",
     )
 
 
@@ -169,7 +170,7 @@ def test_decisions_faux_sur_trois_contextes(tmp_path):
     memoire = MemoireJSON(tmp_path / "partagee.json")
     llm = LLMFaux()
     for nom in ("contexte_p1.json", "contexte_p2.json"):
-        resultat = enqueter(charger(nom), memoire, llm, AbstentionSeuil(), war_room_active=True)
+        resultat = enqueter(charger(nom), memoire, llm, AbstentionSeuil(), war_room_active=True, mode_preuves="outils")
         assert resultat.correctif is not None and not resultat.decision_abstention.abstient
         assert resultat.metriques.nb_tours_war_room == 2
         assert resultat.metriques.nb_objections_sans_reponse == 0
@@ -232,7 +233,7 @@ def test_historien_utilise_memoire_sans_appel_llm(tmp_path):
         correctif_essaye="Correction passee", resultat="echoue", date="2026-10-01",
     )
     memoire.ecrire(souvenir)
-    resultat = enqueter(contexte, memoire, LLMFaux(), AbstentionSeuil(), war_room_active=True)
+    resultat = enqueter(contexte, memoire, LLMFaux(), AbstentionSeuil(), war_room_active=True, mode_preuves="outils")
     historien = next(element for element in resultat.evenements
                      if element.type == "debat" and element.acteur == "historien")
     for contenu in (souvenir.correctif_essaye, souvenir.date, souvenir.resultat,

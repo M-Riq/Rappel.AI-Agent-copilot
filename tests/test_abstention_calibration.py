@@ -15,7 +15,7 @@ def charger(nom):
 
 
 def executer(contexte, memoire):
-    return enqueter(contexte, memoire, LLMFaux(), AbstentionSeuil())
+    return enqueter(contexte, memoire, LLMFaux(), AbstentionSeuil(), mode_preuves="outils")
 
 
 def verifier_abstention(resultat):

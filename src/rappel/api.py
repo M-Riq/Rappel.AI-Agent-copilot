@@ -13,6 +13,7 @@ from .enquete import enqueter
 from .interfaces.abstention import Abstention, AbstentionSeuil
 from .interfaces.llm import LLM, creer_llm
 from .interfaces.memoire import Memoire, MemoireJSON
+from .interfaces.run_sql import RunSql, creer_run_sql, verifier_backend
 from .interfaces.traceur import Traceur, creer_traceur, proteger_traceur
 
 
@@ -44,7 +45,15 @@ def creer_app(
     executeur_enquete: Callable[[Callable[[], None]], object] | None = None,
     executeur_action: Callable[[str, CorrectifPropose], None] | None = None,
     traceur: Traceur | None = None,
+    mode_preuves: Literal["sql", "outils"] = "sql",
+    fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
 ) -> FastAPI:
+    if mode_preuves not in {"sql", "outils"}:
+        raise ValueError("mode_preuves doit etre sql ou outils")
+    if mode_preuves == "sql" and fabrique_run_sql is None:
+        # Erreur claire au demarrage si RUN_SQL_BACKEND n'est pas utilisable (ex. zetaris non branche).
+        verifier_backend()
+        fabrique_run_sql = creer_run_sql
     suivi = proteger_traceur(creer_traceur() if traceur is None else traceur)
     incidents = {}
     verrou = RLock()
@@ -85,7 +94,8 @@ def creer_app(
             # Les dependances partagees ont des budgets et une memoire mutables.
             with verrou_execution:
                 resultat = enqueter(contexte, memoire, llm, abstention,
-                                    sur_evenement=recevoir, traceur=suivi)
+                                    sur_evenement=recevoir, traceur=suivi,
+                                    mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql)
             with verrou:
                 incident = obtenir(contexte.incident_id)
                 incident["resultat"] = resultat
@@ -189,6 +199,8 @@ def creer_app(
                     hypotheses=resultat.hypotheses, correctif=resultat.correctif,
                     decision_abstention=resultat.decision_abstention, metriques=resultat.metriques,
                     decision_humaine=incident["decision"],
+                    mode_preuves=resultat.mode_preuves, source_preuves=resultat.source_preuves,
+                    preuves_simulees=(resultat.source_preuves or "").startswith("simule"),
                 )
             return jsonable_encoder(reponse)
 

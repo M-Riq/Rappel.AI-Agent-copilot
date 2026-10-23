@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from scripts._essai_commun import afficher, autoriser, fermer, nettoyer
 from src.rappel.contrats import ContexteIncident
 from src.rappel.enquete import ResultatEnquete, enqueter
+from src.rappel.enquete.boucle_sql import MAX_TOURS
 from src.rappel.enquete.war_room import configuration
 from src.rappel.interfaces.abstention import AbstentionSeuil
 from src.rappel.interfaces.llm import creer_llm
@@ -28,8 +29,10 @@ def charger_contextes():
     }
 
 
-def jouer_demo(llm, war_room=False, contextes=None):
+def jouer_demo(llm, war_room=False, contextes=None, mode_preuves="sql"):
     contextes = charger_contextes() if contextes is None else contextes
+    # La war room (hors MVP) n'existe qu'en mode outils.
+    war_room = war_room and mode_preuves == "outils"
     resultats = {}
     with TemporaryDirectory() as dossier:
         partagee = MemoireJSON(Path(dossier) / "partagee.json")
@@ -38,7 +41,7 @@ def jouer_demo(llm, war_room=False, contextes=None):
             try:
                 resultats[nom] = enqueter(
                     contextes[nom], partagee if nom != "P3" else vide, llm,
-                    AbstentionSeuil(), war_room_active=war_room,
+                    AbstentionSeuil(), war_room_active=war_room, mode_preuves=mode_preuves,
                 )
             except Exception:
                 resultats[nom] = None
@@ -62,12 +65,20 @@ def reduction(avant, apres):
     return None if avant == 0 else 100 * (avant - apres) / avant
 
 
+def source_preuves(resultat):
+    if resultat.mode_preuves != "sql":
+        return "outils (deterministe)"
+    source = resultat.source_preuves or "inconnue"
+    return f"{source} (SIMULE)" if source.startswith("simule") else source
+
+
 def afficher_resultats(resultats):
-    afficher("Scenario | Evenements | Hypotheses testees | Ecartees memoire | Appels LLM | Tokens entree/sortie | Duree ms | Decision")
+    afficher("Scenario | Evenements | Hypotheses testees | Ecartees memoire | Appels LLM | Tours | "
+             "Requetes SQL | Appels rapide/profonde | Tokens entree/sortie | Duree ms | Source preuves | Decision")
     for nom in ("P1", "P2", "P3"):
         resultat = resultats[nom]
         if resultat is None:
-            afficher(f"{nom} | n/a | n/a | n/a | n/a | n/a | n/a | ERREUR")
+            afficher(f"{nom} | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | ERREUR")
             continue
         metriques = resultat.metriques
         entree = "n/a" if metriques.nb_tokens_entree is None else metriques.nb_tokens_entree
@@ -77,7 +88,9 @@ def afficher_resultats(resultats):
         )
         afficher(f"{nom} | {metriques.nb_evenements} | {metriques.nb_hypotheses_testees} | "
                  f"{metriques.nb_ecartees_par_memoire} | {metriques.nb_appels_llm} | "
-                 f"{entree}/{sortie} | {metriques.duree_ms:.2f} | {decision}")
+                 f"{metriques.nb_tours} | {metriques.nb_requetes_sql} | "
+                 f"{metriques.nb_appels_rapide}/{metriques.nb_appels_profonde} | "
+                 f"{entree}/{sortie} | {metriques.duree_ms:.2f} | {source_preuves(resultat)} | {decision}")
     premier, second = resultats["P1"], resultats["P2"]
     if premier is not None and second is not None:
         hypotheses = reduction(premier.metriques.nb_hypotheses_testees, second.metriques.nb_hypotheses_testees)
@@ -85,6 +98,8 @@ def afficher_resultats(resultats):
         afficher("\nComparaison P1 vs P2 (reduction positive = economie) :")
         afficher(f"Hypotheses testees : {hypotheses:.2f}% de reduction" if hypotheses is not None else "Hypotheses testees : n/a")
         afficher(f"Evenements : {evenements:.2f}% de reduction" if evenements is not None else "Evenements : n/a")
+        appels = reduction(premier.metriques.nb_appels_llm, second.metriques.nb_appels_llm)
+        afficher(f"Appels LLM : {appels:.2f}% de reduction" if appels is not None else "Appels LLM : n/a")
         afficher(f"Duree : {premier.metriques.duree_ms:.2f} -> {second.metriques.duree_ms:.2f} ms ; "
                  f"difference={second.metriques.duree_ms - premier.metriques.duree_ms:+.2f} ms")
     afficher("\nFil des evenements P2 :")
@@ -125,22 +140,28 @@ def exporter_json(resultats, chemin):
 
 def main(argv=None, fabrique_llm=None, contextes=None):
     parseur = argparse.ArgumentParser(description="Demo locale P1, P2, P3, sans serveur ni memoire persistante.")
-    parseur.add_argument("--war-room", action="store_true")
+    parseur.add_argument("--war-room", action="store_true", help="Mode outils uniquement (hors MVP)")
+    parseur.add_argument("--mode", choices=("sql", "outils"), default="sql")
     parseur.add_argument("--json", type=Path, metavar="CHEMIN")
     parseur.add_argument("--confirmer", action="store_true")
     arguments = parseur.parse_args(argv)
     llm = None
     try:
         load_dotenv(override=False)
-        config = configuration(active=True) if arguments.war_room else None
-        appels_prevus = 12 + (3 * min(config.max_appels_llm, 8 * config.max_tours) if config else 0)
+        config = configuration(active=True) if arguments.war_room and arguments.mode == "outils" else None
+        if arguments.mode == "sql":
+            appels_prevus = 3 * MAX_TOURS
+            if arguments.war_room:
+                afficher("War room ignoree : hors MVP, disponible seulement avec --mode outils.")
+        else:
+            appels_prevus = 12 + (3 * min(config.max_appels_llm, 8 * config.max_tours) if config else 0)
         if not autoriser(arguments.confirmer, appels_prevus, executions=3):
             return 1
-        if arguments.war_room:
+        if config is not None:
             afficher(f"Debat : jusqu'a {config.max_appels_llm} appels supplementaires par scenario "
                      f"et {config.max_tours} tours, toujours sous LLM_MAX_APPELS.")
         llm = (fabrique_llm or creer_llm)()
-        resultats = jouer_demo(llm, arguments.war_room, contextes)
+        resultats = jouer_demo(llm, arguments.war_room, contextes, arguments.mode)
         afficher_resultats(resultats)
         if arguments.json is not None:
             exporter_json(resultats, arguments.json)

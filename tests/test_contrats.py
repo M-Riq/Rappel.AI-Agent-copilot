@@ -60,6 +60,8 @@ EVENEMENT = {
     "acteur": "detective",
     "texte": "Examiner le dernier renommage de colonne",
     "horodatage": "2026-10-15T10:42:00Z",
+    "modele": None,
+    "requete_sql": None,
 }
 
 

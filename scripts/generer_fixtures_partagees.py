@@ -22,7 +22,7 @@ def generer_documents():
     with TemporaryDirectory() as dossier:
         resultat = enqueter(
             contexte, MemoireJSON(Path(dossier) / "memoire.json"),
-            LLMFaux(), AbstentionSeuil(), war_room_active=False,
+            LLMFaux(), AbstentionSeuil(), war_room_active=False, mode_preuves="sql",
         )
     if resultat.correctif is None:
         raise ValueError("L'enquete P1 ne produit plus de correctif")

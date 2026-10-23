@@ -35,9 +35,9 @@ def mesurer_comparaison(contexte, llm, tours=2, max_appels=6, brut=False):
     capture = LLMCapture(llm, brut)
     with TemporaryDirectory() as dossier:
         sans = enqueter(contexte, MemoireJSON(Path(dossier) / "sans.json"), capture,
-                        AbstentionSeuil(), war_room_active=False)
+                        AbstentionSeuil(), war_room_active=False, mode_preuves="outils")
         avec = enqueter(contexte, MemoireJSON(Path(dossier) / "avec.json"), capture,
-                        AbstentionSeuil(), war_room_active=True,
+                        AbstentionSeuil(), war_room_active=True, mode_preuves="outils",
                         war_room_max_tours=tours, war_room_max_appels_llm=max_appels)
     for evenement in avec.evenements:
         if evenement.type == "debat":

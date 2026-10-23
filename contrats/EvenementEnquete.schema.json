@@ -39,6 +39,30 @@
     "horodatage": {
       "title": "Horodatage",
       "type": "string"
+    },
+    "modele": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Modele"
+    },
+    "requete_sql": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requete Sql"
     }
   },
   "required": [

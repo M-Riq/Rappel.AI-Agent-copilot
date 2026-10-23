@@ -15,6 +15,7 @@ from scripts._essai_commun import afficher, autoriser, fermer
 from scripts.demo_enquete import nettoyer_document
 from src.rappel.contrats import ContexteIncident
 from src.rappel.enquete import enqueter
+from src.rappel.enquete.boucle_sql import ADAPTATEUR_CANDIDATS_SQL, MAX_TOURS, extraire_valeur_json
 from src.rappel.enquete.graphe import ADAPTATEUR_CANDIDATS, extraire_json
 from src.rappel.enquete.war_room import configuration
 from src.rappel.interfaces.abstention import AbstentionSeuil
@@ -35,11 +36,13 @@ class ObservateurCandidats:
 
     def completer(self, prompt, role="detective"):
         reponse = self.llm.completer(prompt, role=role)
-        if role == "detective" and not prompt.startswith("{"):
-            try:
+        try:
+            if role == "detective" and not prompt.startswith("{"):
                 self.candidats = ADAPTATEUR_CANDIDATS.validate_json(extraire_json(reponse))
-            except (ValueError, TypeError, AttributeError):
-                pass
+            elif role == "hypotheses":
+                self.candidats = ADAPTATEUR_CANDIDATS_SQL.validate_json(extraire_valeur_json(reponse, list))
+        except (ValueError, TypeError, AttributeError):
+            pass
         return reponse
 
     def categorie_retenue(self, resultat):
@@ -48,7 +51,9 @@ class ObservateurCandidats:
         if retenue is None:
             return None
         indice = int(retenue.id.rsplit(":hyp-", 1)[1]) - 1
-        return self.candidats[indice].categorie
+        candidat = self.candidats[indice]
+        # En mode sql la categorie est optionnelle : a defaut, le texte de l'hypothese.
+        return candidat.categorie or candidat.texte
 
 
 def calculer_stabilite(mesures):
@@ -74,7 +79,7 @@ def calculer_stabilite(mesures):
     }
 
 
-def mesurer_stabilite(contexte, llm, repetitions=5, war_room=False):
+def mesurer_stabilite(contexte, llm, repetitions=5, war_room=False, mode_preuves="sql"):
     if repetitions < 1:
         raise ValueError("Nombre de repetitions positif requis")
     mesures = []
@@ -84,7 +89,8 @@ def mesurer_stabilite(contexte, llm, repetitions=5, war_room=False):
             try:
                 resultat = enqueter(
                     contexte, MemoireJSON(Path(dossier) / f"repetition-{indice}.json"),
-                    observateur, AbstentionSeuil(), war_room_active=war_room,
+                    observateur, AbstentionSeuil(), war_room_active=war_room and mode_preuves == "outils",
+                    mode_preuves=mode_preuves,
                 )
                 mesure = {
                     "repetition": indice, "statut": "termine",
@@ -122,7 +128,8 @@ def main(argv=None, fabrique_llm=None):
     parseur.add_argument("--fixture", default="fixtures/contexte_p1.json")
     parseur.add_argument("--repetitions", type=int, default=5)
     parseur.add_argument("--json", type=Path, metavar="CHEMIN")
-    parseur.add_argument("--war-room", action="store_true")
+    parseur.add_argument("--war-room", action="store_true", help="Mode outils uniquement (hors MVP)")
+    parseur.add_argument("--mode", choices=("sql", "outils"), default="sql")
     parseur.add_argument("--confirmer", action="store_true")
     arguments = parseur.parse_args(argv)
     if arguments.repetitions < 1:
@@ -130,15 +137,18 @@ def main(argv=None, fabrique_llm=None):
     llm = None
     try:
         load_dotenv(override=False)
-        config = configuration(active=True) if arguments.war_room else None
-        maximum = arguments.repetitions * (4 + (min(config.max_appels_llm, 8 * config.max_tours) if config else 0))
+        config = configuration(active=True) if arguments.war_room and arguments.mode == "outils" else None
+        if arguments.mode == "sql":
+            maximum = arguments.repetitions * MAX_TOURS
+        else:
+            maximum = arguments.repetitions * (4 + (min(config.max_appels_llm, 8 * config.max_tours) if config else 0))
         if not autoriser(arguments.confirmer, maximum, executions=arguments.repetitions):
             return 2
         if (os.getenv("LLM_PROVIDER", "").strip().lower() or "faux") == "faux":
             afficher("Fournisseur faux : controle du mecanisme seulement, A15 reel reste a mesurer.")
         contexte = ContexteIncident.model_validate_json(Path(arguments.fixture).read_text(encoding="utf-8"))
         llm = (fabrique_llm or creer_llm)()
-        rapport = mesurer_stabilite(contexte, llm, arguments.repetitions, arguments.war_room)
+        rapport = mesurer_stabilite(contexte, llm, arguments.repetitions, arguments.war_room, arguments.mode)
         afficher_rapport(rapport)
         if arguments.json:
             destination = arguments.json.resolve()

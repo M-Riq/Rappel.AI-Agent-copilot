@@ -126,7 +126,7 @@ def test_doublon_garde_premiere_occurrence():
 
 def test_enquete_schema_sans_types(tmp_path):
     incident = contexte({"attendu": ["id", "ancien"], "observe": ["id", "nouveau"]})
-    resultat = enqueter(incident, MemoireJSON(tmp_path / "memoire.json"), LLMFaux(), AbstentionSeuil())
+    resultat = enqueter(incident, MemoireJSON(tmp_path / "memoire.json"), LLMFaux(), AbstentionSeuil(), mode_preuves="outils")
     assert resultat.correctif is not None
     assert "renomm" in resultat.correctif.justification
     patch = json.loads(resultat.correctif.patch)
