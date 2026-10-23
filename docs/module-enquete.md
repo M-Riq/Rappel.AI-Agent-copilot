@@ -12,7 +12,8 @@
 Integration dans le squelette de l'equipe (branche `naomy/integration`) : le moteur vit dans
 `src/rappel/enquete/` et s'appuie sur les interfaces du squelette (`rappel.interfaces.llm`,
 `rappel.interfaces.memoire`, `rappel.interfaces.tools_zetaris`, `rappel.config`). L'API
-Phase 0/1 du squelette (`rappel.api`) n'appelle pas encore le moteur.
+(`rappel.api`, voir [api.md](api.md)) garde le contrat Phase 0/1 du squelette et lance le
+moteur dans un thread a chaque `POST /incidents`. Origine du code : [ORIGINE-DU-CODE.md](ORIGINE-DU-CODE.md).
 
 | Fichier | Role |
 | --- | --- |
@@ -250,8 +251,12 @@ d'evenements n'incluent pas les decisions humaines ajoutees ensuite par l'API.
 
 Depuis la racine du depot (`pytest.ini` ajoute `src` et la racine au chemin) :
 
+`pip install -r requirements.txt` installe aussi `langgraph`, requis par le moteur et ses
+tests ; `requirements-demo.txt` n'ajoute plus que `psycopg`.
+
 ```bash
 pytest --ignore=tests/test_ui.py
+uvicorn rappel.api:app --app-dir src               # API : contrat du squelette + enquete en thread
 python scripts/demo_enquete.py                     # P1, P2, P3 en mode sql, LLM_PROVIDER=fake
 python scripts/demo_enquete.py --mode outils --war-room --json data/demo.json
 python scripts/stabilite_p1.py                     # mode sql par defaut, --mode outils possible
@@ -266,6 +271,11 @@ Le tableau affiche `Tours`, `Requetes SQL`, `Appels rapide/profonde` et `Source 
 (`simule-sqlite (SIMULE)` en mode fichier, `zetaris` sinon) : une preuve simulee n'est
 jamais presentee comme reelle. `--war-room` n'a d'effet qu'avec `--mode outils`.
 Avec `LLM_PROVIDER=meterless`, demo et stabilite exigent `--confirmer` (appels reels).
+
+Scripts non importes de l'ancien depot : `essai_llm.py`, `essai_detective.py` et
+`essai_war_room.py` ciblaient NVIDIA et Claude en direct, ce que l'equipe exclut (tout passe
+par Meterless). Le diagnostic reel se fait avec `check_meterless.py` et `check_zetaris.py`
+du squelette ; `check_meterless.py` de l'ancien depot n'a pas ete repris.
 
 ## 4. Configuration unique
 
@@ -455,8 +465,9 @@ un identifiant d'incident.
   Meterless Nightshift, Zetaris et Postgres ne sont pas testes en reel ici.
 - Zetaris doit exposer les tables de `TABLES` (vues limitees a l'incident) ; le corps REST
   reste a confirmer cote equipe (`CLE_SQL_CORPS` dans `tools_zetaris.py`). Voir [run_sql.md](run_sql.md).
-- L'API Phase 0/1 du squelette ne lance pas encore le moteur ; l'ancienne API du moteur
-  n'a pas ete importee.
+- En mode fake, `GET /incidents/{id}/evenements` reste la vue d'affichage du squelette
+  (fixture P1, liste vide sinon) ; le fil du moteur est sur `/incidents/{id}/enquete/evenements`.
+- API locale sans authentification, etat des incidents en memoire du processus (un seul worker).
 - Seuils choisis sur trois fixtures et perturbations synthetiques ; la confiance est un
   score heuristique, pas une probabilite calibree.
 - La fusion conclusion + correctif repose sur un correctif `reussi` de meme signature.
@@ -485,5 +496,6 @@ prompt MVP v4 (mode sql), A7-A15 la numerotation precedente.
 | A13 | Fait en simulation ; reel a faire | Lanes Meterless, modele renvoye, compteurs, plafond, non-fuite : [test_adaptateurs.py](../tests/test_adaptateurs.py) |
 | A14 | Code pret, liaison SDK a verifier | [test_traceur.py](../tests/test_traceur.py) |
 | A15 | Mecanisme fait ; mesure reelle a faire | `stabilite_p1.py` en mode sql : 5/5 avec le LLM faux |
+| API | Fait (contrat du squelette conserve) | [test_api.py](../tests/test_api.py) (equipe), [test_api_enquete.py](../tests/test_api_enquete.py) |
 | Memoire | Fait (JSON + Postgres simule) | [test_adaptateurs.py](../tests/test_adaptateurs.py) |
 | run_sql | Fait (fichier + Zetaris simule) | [test_run_sql.py](../tests/test_run_sql.py) |

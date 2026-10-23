@@ -74,3 +74,10 @@ def test_horodatages_synthetiques_reguliers():
 def test_sorties_suivies_identiques_generation():
     for nom, contenu in generateur.generer_octets().items():
         assert (FIXTURES / nom).read_bytes() == contenu
+
+def test_fixtures_moteur_conformes_aux_schemas_de_l_equipe():
+    from rappel.contrats import valider
+
+    for evenement in json.loads((FIXTURES / "evenements_p1.json").read_text(encoding="utf-8")):
+        valider("evenement_enquete", evenement)
+    valider("correctif_propose", json.loads((FIXTURES / "correctif_p1.json").read_text(encoding="utf-8")))

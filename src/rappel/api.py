@@ -1,20 +1,43 @@
-"""API Phase 0/1 : contextes et décisions en mémoire, sans exécuter de patch."""
+"""API Rappel : contrat Phase 0/1 du squelette et moteur d'enquête en arrière-plan.
+
+Contrat du squelette conservé (tests/test_api.py, ui/app.py) :
+- GET /healthz (alias /sante) : statut et modes llm, source, memoire ;
+- POST /incidents : 201 {"id"}, 422 si le JSON Schema échoue, 409 si doublon ;
+- GET /incidents/{id}/evenements : vue d'affichage. En mode fake, l'incident « p1 »
+  des fixtures est servi comme avant (et n'est jamais présenté comme une enquête
+  réelle) ; hors mode fake, ce sont les événements de l'enquête réelle ;
+- POST /correctifs/{id}/decision : décision enregistrée, jamais d'exécution de patch.
+
+Ajouts : chaque POST /incidents lance l'enquête du moteur dans un thread ; fil en direct
+(GET /incidents/{id}/enquete/evenements), résultat (GET /incidents/{id}), liste
+(GET /incidents), retour Action, mémoire (lecture et réinitialisation confirmée).
+Le moteur (LangGraph) est importé au lancement d'une enquête : /healthz reste léger.
+"""
 
 import json
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import datetime, timezone
 from threading import RLock
-from typing import Literal
+from typing import Callable, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from jsonschema import ValidationError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool, field_validator
 
 from rappel.config import RACINE, charger
 from rappel.contrats import valider
 
-app = FastAPI(title="Rappel — Phase 0/1")
+# État partagé de l'application globale (les tests du squelette les manipulent).
 _INCIDENTS = {}
 _DECISIONS = {}
+_ENQUETES = {}
 _VERROU = RLock()
+CHAMPS_FIXTURE = ("signature", "logs", "commits_recents", "schema", "metriques")
+MESSAGE_ERREUR = "Enquête impossible. Consulter la configuration et réessayer."
+MESSAGE_MOTEUR_ABSENT = "Moteur d'enquête indisponible : installer requirements.txt (langgraph)."
 
 
 class DecisionCorrectif(BaseModel):
@@ -22,65 +45,338 @@ class DecisionCorrectif(BaseModel):
     decision: Literal["appliquer", "refuser"]
 
 
-@app.get("/healthz")
-def sante():
-    configuration = charger()
-    return {
-        "statut": "ok",
-        "llm": configuration.llm_provider,
-        "source": configuration.source_provider,
-        "memoire": configuration.memoire_provider,
-    }
+class ResultatAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    resultat: Literal["reussi", "echoue"]
 
 
-@app.post("/incidents", status_code=201)
-def creer_incident(contexte: dict):
-    try:
-        valider("contexte_incident", contexte)
-    except ValidationError:
-        raise HTTPException(422, "ContexteIncident non conforme au contrat.") from None
-    identifiant = contexte["incident_id"]
-    with _VERROU:
-        if identifiant in _INCIDENTS:
-            raise HTTPException(409, "Cet incident existe déjà.")
-        _INCIDENTS[identifiant] = contexte
-    return {"id": identifiant}
+class ReinitialisationMemoire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmer: StrictBool
+    incidents: StrictBool = False
+
+    @field_validator("confirmer")
+    @classmethod
+    def confirmation_obligatoire(cls, valeur: bool) -> bool:
+        if not valeur:
+            raise ValueError("confirmer doit valoir true pour effacer la mémoire")
+        return valeur
 
 
-@app.get("/incidents/{identifiant}/evenements")
-def lire_evenements(identifiant: str):
-    # p1 est aussi accessible sans ingestion pour démarrer l'interface locale.
-    with _VERROU:
-        if identifiant != "p1" and identifiant not in _INCIDENTS:
+def _maintenant():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _fixture(nom):
+    return json.loads((RACINE / "fixtures" / nom).read_text(encoding="utf-8"))
+
+
+def _json_contrat(objet):
+    return objet.model_dump(mode="json", exclude_none=True)
+
+
+def creer_app(
+    memoire=None, llm=None, abstention=None, *,
+    executeur_enquete: Callable[[Callable[[], None]], object] | None = None,
+    traceur=None, mode_preuves: Literal["sql", "outils"] = "sql", fabrique_run_sql=None,
+    incidents: dict | None = None, decisions: dict | None = None, enquetes: dict | None = None,
+    verrou=None,
+) -> FastAPI:
+    """Dépendances optionnelles : sinon choisies à chaque enquête selon la configuration."""
+    if mode_preuves not in ("sql", "outils"):
+        raise ValueError("mode_preuves doit valoir sql ou outils")
+    from rappel.enquete.traceur import creer_traceur, proteger_traceur
+
+    incidents = {} if incidents is None else incidents
+    decisions = {} if decisions is None else decisions
+    enquetes = {} if enquetes is None else enquetes
+    verrou = RLock() if verrou is None else verrou
+    verrou_execution = RLock()
+    suivi = proteger_traceur(creer_traceur() if traceur is None else traceur)
+    travailleurs = ThreadPoolExecutor(max_workers=1, thread_name_prefix="enquete")
+    en_cours = set()
+
+    def soumettre_par_defaut(tache):
+        futur = travailleurs.submit(tache)
+        en_cours.add(futur)
+        futur.add_done_callback(en_cours.discard)
+        return futur
+
+    soumettre = executeur_enquete or soumettre_par_defaut
+
+    @asynccontextmanager
+    async def cycle_vie(application):
+        yield
+        # Attendre les enquêtes lancées sans fermer l'exécuteur : l'application peut redémarrer.
+        wait(list(en_cours))
+
+    application = FastAPI(
+        title="Rappel — API d'enquête", lifespan=cycle_vie,
+        description="API locale sans authentification : ne pas l'exposer publiquement.",
+    )
+
+    def memoire_courante():
+        if memoire is not None:
+            return memoire
+        from rappel.enquete.adaptateurs import MemoireEnquete
+
+        return MemoireEnquete()
+
+    def etat_enquete(identifiant):
+        """État de l'enquête d'un incident enregistré, sinon None (verrou tenu par l'appelant)."""
+        return enquetes.get(identifiant) if identifiant in incidents else None
+
+    def obtenir(identifiant):
+        etat = etat_enquete(identifiant)
+        if etat is None:
             raise HTTPException(404, "Incident inconnu.")
-    if charger().llm_provider != "fake":
-        raise HTTPException(501, "La boucle d'enquête réelle sera implémentée en Phase 2/3.")
-    evenements = json.loads(
-        (RACINE / "fixtures" / "evenements_p1.json").read_text(encoding="utf-8")
-    )
-    # La fixture P1 ne doit pas produire de faux diagnostics pour P2 ou P3.
-    contexte_p1 = json.loads(
-        (RACINE / "fixtures" / "contexte_p1.json").read_text(encoding="utf-8")
-    )
-    with _VERROU:
-        contexte = _INCIDENTS.get(identifiant, contexte_p1)
-    if any(
-        contexte[champ] != contexte_p1[champ]
-        for champ in ("signature", "logs", "commits_recents", "schema", "metriques")
+        return etat
+
+    def ajouter_decision(identifiant, etat, texte):
+        from rappel.enquete.modeles import EvenementEnquete
+
+        etat["evenements"].append(EvenementEnquete(
+            incident_id=identifiant, etape=len(etat["evenements"]) + 1, type="decision",
+            acteur="systeme", texte=texte, horodatage=_maintenant(),
+        ))
+
+    def executer(identifiant, contexte, jeton):
+        def courant():
+            etat = enquetes.get(identifiant)
+            return etat if etat is not None and etat["jeton"] is jeton else None
+
+        def recevoir(evenement):
+            with verrou:
+                etat = courant()
+                if etat is not None:
+                    etat["evenements"].append(evenement.model_copy(deep=True))
+
+        try:
+            from rappel.enquete import enqueter
+            from rappel.enquete.adaptateurs import creer_llm_enquete
+            from rappel.interfaces.abstention import AbstentionSeuil
+        except ImportError:
+            with verrou:
+                etat = courant()
+                if etat is not None:
+                    etat.update(statut="erreur", message=MESSAGE_MOTEUR_ABSENT)
+            return
+        try:
+            # Budgets LLM et mémoire sont mutables : une enquête à la fois.
+            with verrou_execution:
+                resultat = enqueter(
+                    contexte, memoire_courante(), llm or creer_llm_enquete(),
+                    abstention or AbstentionSeuil(), sur_evenement=recevoir, traceur=suivi,
+                    mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
+                )
+            with verrou:
+                etat = courant()
+                if etat is not None:
+                    etat.update(resultat=resultat, statut="termine")
+        except Exception:
+            # Aucun détail d'exception exposé ni journalisé (secrets possibles).
+            with verrou:
+                etat = courant()
+                if etat is not None:
+                    etat.update(statut="erreur", message=MESSAGE_ERREUR)
+
+    def sante():
+        configuration = charger()
+        return {
+            "statut": "ok",
+            "llm": configuration.llm_provider,
+            "source": configuration.source_provider,
+            "memoire": configuration.memoire_provider,
+        }
+
+    application.get("/healthz")(sante)
+    application.get("/sante")(sante)
+
+    @application.post("/incidents", status_code=201)
+    def creer_incident(contexte: dict):
+        try:
+            valider("contexte_incident", contexte)
+        except ValidationError:
+            raise HTTPException(422, "ContexteIncident non conforme au contrat.") from None
+        identifiant = contexte["incident_id"]
+        jeton = object()
+        with verrou:
+            if identifiant in incidents:
+                raise HTTPException(409, "Cet incident existe déjà.")
+            incidents[identifiant] = contexte
+            decisions.pop(identifiant, None)
+            enquetes[identifiant] = {
+                "jeton": jeton, "statut": "en_cours", "evenements": [], "resultat": None,
+                "message": None, "cree_le": _maintenant(), "resultat_action": None,
+                "llm": charger().llm_provider,
+            }
+        try:
+            soumettre(lambda: executer(identifiant, contexte, jeton))
+        except Exception:
+            with verrou:
+                etat = enquetes.get(identifiant)
+                if etat is not None and etat["jeton"] is jeton:
+                    etat.update(statut="erreur", message="Impossible de démarrer l'enquête.")
+        return {"id": identifiant}
+
+    @application.get("/incidents")
+    def lister_incidents(
+        limite: int = Query(default=50, ge=1, le=200),
+        statut: Literal["en_cours", "termine", "erreur"] | None = None,
     ):
-        return []
-    return [{**evenement, "incident_id": identifiant} for evenement in evenements]
+        with verrou:
+            resumes = []
+            for identifiant in reversed(list(incidents)):
+                etat = enquetes.get(identifiant)
+                if etat is None or (statut is not None and etat["statut"] != statut):
+                    continue
+                resultat = etat["resultat"]
+                resumes.append({
+                    "incident_id": identifiant, "signature": incidents[identifiant]["signature"],
+                    "statut": etat["statut"], "cree_le": etat["cree_le"],
+                    "nb_evenements": len(etat["evenements"]),
+                    "a_correctif": resultat is not None and resultat.correctif is not None,
+                    "abstention": resultat.decision_abstention.abstient if resultat is not None else None,
+                    "decision_humaine": decisions.get(identifiant),
+                    "resultat_action": etat["resultat_action"],
+                })
+                if len(resumes) == limite:
+                    break
+            return resumes
+
+    @application.get("/incidents/{identifiant}")
+    def lire_incident(identifiant: str):
+        with verrou:
+            etat = obtenir(identifiant)
+            reponse = {
+                "incident_id": identifiant, "statut": etat["statut"], "llm": etat["llm"],
+                # En mode fake, le raisonnement est simulé : jamais présenté comme réel.
+                "enquete_simulee": etat["llm"] == "fake",
+            }
+            if etat["statut"] == "erreur":
+                reponse["message"] = etat["message"]
+            resultat = etat["resultat"]
+            if etat["statut"] == "termine" and resultat is not None:
+                reponse.update(
+                    hypotheses=[_json_contrat(hypothese) for hypothese in resultat.hypotheses],
+                    correctif=None if resultat.correctif is None else _json_contrat(resultat.correctif),
+                    decision_abstention=asdict(resultat.decision_abstention),
+                    metriques=asdict(resultat.metriques),
+                    mode_preuves=resultat.mode_preuves, source_preuves=resultat.source_preuves,
+                    preuves_simulees=(resultat.source_preuves or "").startswith("simule"),
+                    decision_humaine=decisions.get(identifiant),
+                    resultat_action=etat["resultat_action"],
+                )
+            return jsonable_encoder(reponse)
+
+    @application.get("/incidents/{identifiant}/enquete/evenements")
+    def lire_fil_enquete(identifiant: str, apres: int = Query(default=0, ge=0)):
+        with verrou:
+            etat = obtenir(identifiant)
+            return [_json_contrat(evenement) for evenement in etat["evenements"] if evenement.etape > apres]
+
+    @application.get("/incidents/{identifiant}/evenements")
+    def lire_evenements(identifiant: str):
+        with verrou:
+            contexte = incidents.get(identifiant)
+            etat = etat_enquete(identifiant)
+            if identifiant != "p1" and contexte is None:
+                raise HTTPException(404, "Incident inconnu.")
+            reels = [_json_contrat(evenement) for evenement in etat["evenements"]] if etat else []
+        if charger().llm_provider != "fake":
+            if etat is None:
+                raise HTTPException(
+                    501, "La fixture P1 n'est servie qu'en mode fake : soumettre l'incident pour une enquête réelle."
+                )
+            return reels
+        # Mode fake : vue d'affichage de la fixture P1, comme dans le squelette Phase 0/1.
+        contexte_p1 = _fixture("contexte_p1.json")
+        contexte = contexte or contexte_p1
+        if any(contexte[champ] != contexte_p1[champ] for champ in CHAMPS_FIXTURE):
+            return []
+        return [{**evenement, "incident_id": identifiant} for evenement in _fixture("evenements_p1.json")]
+
+    @application.post("/correctifs/{identifiant}/decision")
+    def decider_correctif(identifiant: str, decision: DecisionCorrectif):
+        with verrou:
+            etat = etat_enquete(identifiant)
+            resultat = etat["resultat"] if etat else None
+            if resultat is not None and resultat.correctif is not None:
+                decisions[identifiant] = decision.decision
+                ajouter_decision(identifiant, etat, f"Décision humaine : {decision.decision} ; aucun patch exécuté")
+                return {
+                    "id": identifiant, "decision": decision.decision, "execute": False,
+                    "message": "Décision enregistrée ; aucun patch exécuté par l'API.",
+                }
+            if identifiant == "p1" and charger().llm_provider == "fake":
+                decisions[identifiant] = decision.decision
+                return {
+                    "id": identifiant, "decision": decision.decision, "execute": False,
+                    "message": "Décision enregistrée en mémoire ; aucun patch exécuté en Phase 0/1.",
+                }
+            if etat is not None and etat["statut"] == "en_cours":
+                raise HTTPException(409, "Enquête en cours : aucun correctif disponible pour l'instant.")
+            if etat is not None:
+                raise HTTPException(409, "Aucun correctif disponible (abstention ou erreur).")
+        raise HTTPException(404, "Correctif inconnu.")
+
+    @application.post("/incidents/{identifiant}/resultat-action", status_code=202)
+    def enregistrer_resultat_action(identifiant: str, corps: ResultatAction):
+        with verrou:
+            etat = obtenir(identifiant)
+            if etat["statut"] != "termine":
+                raise HTTPException(409, "Enquête non terminée.")
+            signature = incidents[identifiant]["signature"]
+        try:
+            with verrou_execution:
+                mise_a_jour = memoire_courante().mettre_a_jour_resultat(signature, corps.resultat)
+        except Exception:
+            raise HTTPException(500, "Mise à jour de la mémoire impossible.") from None
+        with verrou:
+            etat = obtenir(identifiant)
+            etat["resultat_action"] = corps.resultat
+            ajouter_decision(identifiant, etat, f"Résultat Action : {corps.resultat} ; mémoire mise à jour={mise_a_jour}")
+        return {"incident_id": identifiant, "resultat": corps.resultat, "memoire_mise_a_jour": mise_a_jour}
+
+    @application.get("/memoire")
+    def lire_memoire(signature: str | None = None):
+        try:
+            with verrou_execution:
+                courante = memoire_courante()
+                souvenirs = courante.lister() if signature is None else courante.chercher(signature)
+        except Exception:
+            raise HTTPException(500, "Lecture de la mémoire impossible.") from None
+        refutations = {}
+        for souvenir in souvenirs:
+            textes = refutations.setdefault(souvenir.signature, [])
+            textes.extend(texte for texte in souvenir.hypotheses_refutees if texte not in textes)
+        return jsonable_encoder({
+            "souvenirs": [souvenir.model_dump(mode="json") for souvenir in souvenirs],
+            "refutations_par_signature": refutations,
+        })
+
+    @application.post("/memoire/reinitialiser")
+    def reinitialiser_memoire(corps: ReinitialisationMemoire):
+        def verifier_en_cours():
+            if any(enquetes.get(identifiant, {}).get("statut") == "en_cours" for identifiant in incidents):
+                raise HTTPException(409, "Réinitialisation interdite pendant une enquête.")
+
+        with verrou:
+            verifier_en_cours()
+        with verrou_execution, verrou:
+            verifier_en_cours()
+            try:
+                nombre = memoire_courante().vider()
+            except Exception:
+                raise HTTPException(500, "Réinitialisation de la mémoire impossible.") from None
+            supprimes = len(incidents) if corps.incidents else 0
+            if corps.incidents:
+                incidents.clear()
+                enquetes.clear()
+                decisions.clear()
+            return {"souvenirs_supprimes": nombre, "incidents_supprimes": supprimes}
+
+    return application
 
 
-@app.post("/correctifs/{identifiant}/decision")
-def decider_correctif(identifiant: str, decision: DecisionCorrectif):
-    if identifiant != "p1":
-        raise HTTPException(404, "Correctif inconnu ; seul le correctif de fixture p1 existe.")
-    with _VERROU:
-        _DECISIONS[identifiant] = decision.decision
-    return {
-        "id": identifiant,
-        "decision": decision.decision,
-        "execute": False,
-        "message": "Décision enregistrée en mémoire ; aucun patch exécuté en Phase 0/1.",
-    }
+app = creer_app(incidents=_INCIDENTS, decisions=_DECISIONS, enquetes=_ENQUETES, verrou=_VERROU)
