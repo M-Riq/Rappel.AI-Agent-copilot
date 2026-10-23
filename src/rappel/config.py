@@ -32,6 +32,8 @@ class Configuration:
     llm_max_appels: int = 20
     # Appels d'outils natifs (tool_calls run_sql) ; 0 = JSON dans le texte (defaut).
     appel_outils: bool = False
+    # Pipeline de demo isole (Module B) : seul dossier que l'action peut modifier.
+    pipeline_demo_dir: str = "data/pipeline_demo"
     api_url: str = "http://127.0.0.1:8000"
 
     def __post_init__(self):
