@@ -265,6 +265,54 @@ def creer_app(
                     break
             return resumes
 
+    @application.get("/comparaison")
+    def comparer(a: str, b: str):
+        with verrou:
+            resultats = {}
+            for identifiant in (a, b):
+                if etat_enquete(identifiant) is None:
+                    raise HTTPException(404, f"Incident inconnu : {identifiant}.")
+            for identifiant in (a, b):
+                etat = etat_enquete(identifiant)
+                if etat["statut"] != "termine" or etat["resultat"] is None:
+                    raise HTTPException(409, f"Enquête non terminée : {identifiant}.")
+                resultats[identifiant] = (asdict(etat["resultat"].metriques), etat["llm"])
+        metriques_a, llm_a = resultats[a]
+        metriques_b, llm_b = resultats[b]
+
+        def reduction(valeur_a, valeur_b):
+            if valeur_a in (None, 0) or valeur_b is None:
+                return None
+            return round(100 * (valeur_a - valeur_b) / valeur_a, 2)
+
+        def tokens(metriques):
+            if metriques["nb_tokens_entree"] is None or metriques["nb_tokens_sortie"] is None:
+                return None
+            return metriques["nb_tokens_entree"] + metriques["nb_tokens_sortie"]
+
+        def rapport(valeur_a, valeur_b):
+            return None if not valeur_a else round(valeur_b / valeur_a, 4)
+
+        evenements = rapport(metriques_a["nb_evenements"], metriques_b["nb_evenements"])
+        appels = rapport(metriques_a["nb_appels_llm"], metriques_b["nb_appels_llm"])
+        return {
+            "a": a, "b": b, "metriques": {"a": metriques_a, "b": metriques_b},
+            "reductions_pct": {
+                "evenements": reduction(metriques_a["nb_evenements"], metriques_b["nb_evenements"]),
+                "hypotheses_testees": reduction(metriques_a["nb_hypotheses_testees"], metriques_b["nb_hypotheses_testees"]),
+                "appels_llm": reduction(metriques_a["nb_appels_llm"], metriques_b["nb_appels_llm"]),
+                "tokens": reduction(tokens(metriques_a), tokens(metriques_b)),
+                "duree": reduction(metriques_a["duree_ms"], metriques_b["duree_ms"]),
+            },
+            # Critere A9 du cahier : b <= 60 % des evenements de a ET moins d'appels LLM.
+            "regle_60pc": {
+                "evenements_b_sur_a": evenements, "appels_b_sur_a": appels,
+                "respecte": evenements is not None and evenements <= 0.6 and appels is not None and appels < 1,
+            },
+            "simulation": "fake" in (llm_a, llm_b),
+            "note": "la durée n'est pas une preuve de gain avec un LLM simulé",
+        }
+
     @application.get("/incidents/{identifiant}")
     def lire_incident(identifiant: str):
         with verrou:

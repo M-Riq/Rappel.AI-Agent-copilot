@@ -205,3 +205,35 @@ def test_moteur_absent_message_clair(memoire, monkeypatch):
 
 def test_api_globale_partage_l_etat_du_squelette():
     assert api.app is not None and isinstance(api._INCIDENTS, dict) and isinstance(api._DECISIONS, dict)
+
+
+def test_comparaison_p1_p2(client):
+    client.post("/incidents", json=charger())
+    client.post("/incidents", json=charger("p2"))
+    comparaison = client.get("/comparaison", params={"a": "p1", "b": "p2"}).json()
+    assert comparaison["reductions_pct"]["evenements"] == pytest.approx(42.86)
+    assert comparaison["reductions_pct"]["hypotheses_testees"] == 75.0
+    assert comparaison["reductions_pct"]["appels_llm"] == 40.0
+    assert comparaison["reductions_pct"]["tokens"] is None  # LLM faux : aucun token compte
+    assert comparaison["regle_60pc"] == {"evenements_b_sur_a": pytest.approx(0.5714), "appels_b_sur_a": 0.6,
+                                         "respecte": True}
+    assert comparaison["metriques"]["a"]["nb_evenements"] == 21 and comparaison["metriques"]["b"]["nb_evenements"] == 12
+    assert comparaison["note"] == "la durée n'est pas une preuve de gain avec un LLM simulé"
+    assert comparaison["simulation"] is True
+    inverse = client.get("/comparaison", params={"a": "p2", "b": "p1"}).json()
+    assert inverse["regle_60pc"]["respecte"] is False
+
+
+def test_comparaison_inconnu_et_en_cours(memoire):
+    application = api.creer_app(memoire, executeur_enquete=lambda tache: None)
+    with TestClient(application) as client:
+        client.post("/incidents", json=charger())
+        client.post("/incidents", json=charger("p2"))
+        assert client.get("/comparaison", params={"a": "p1", "b": "inconnu"}).status_code == 404
+        assert client.get("/comparaison", params={"a": "p1", "b": "p2"}).status_code == 409
+        assert client.get("/comparaison", params={"a": "p1"}).status_code == 422
+
+
+def test_memoire_mode_expose(client):
+    client.post("/incidents", json=charger())
+    assert client.get("/incidents/p1").json()["memoire_mode"] == "json"
