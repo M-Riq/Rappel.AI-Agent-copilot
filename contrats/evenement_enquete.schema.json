@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Événement d'enquête",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["incident_id", "etape", "type", "acteur", "texte", "horodatage"],
+  "properties": {
+    "incident_id": {"type": "string"},
+    "etape": {"type": "integer"},
+    "type": {"enum": ["hypothese", "preuve", "rejet", "debat", "decision", "abstention"]},
+    "acteur": {"enum": ["detective", "sceptique", "historien", "systeme"]},
+    "texte": {"type": "string"},
+    "horodatage": {"type": "string", "format": "date-time"},
+    "modele": {"type": "string"},
+    "requete_sql": {"type": "string"}
+  }
+}

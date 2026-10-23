@@ -1,0 +1,14 @@
+{
+  "incident_id": "p3",
+  "horodatage": "2026-10-22T12:00:00Z",
+  "signature": "timeout:orders_etl",
+  "logs": [
+    {"template": "TimeoutError: orders source request exceeded 30000 ms", "compte": 12}
+  ],
+  "commits_recents": [],
+  "schema": {
+    "attendu": ["order_id:integer", "amount:decimal"],
+    "observe": ["order_id:integer", "amount:decimal"]
+  },
+  "metriques": {"lignes_rejetees": 0, "latence_ms": 30000}
+}

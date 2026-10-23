@@ -1,0 +1,16 @@
+{
+  "incident_id": "p2",
+  "horodatage": "2026-10-22T11:00:00Z",
+  "signature": "schema_mismatch:orders_etl",
+  "logs": [
+    {"template": "TypeError: amount must be decimal, got text", "compte": 87}
+  ],
+  "commits_recents": [
+    {"hash": "d4e5f6", "message": "change amount type to text", "date": "2026-10-22T10:50:00Z"}
+  ],
+  "schema": {
+    "attendu": ["order_id:integer", "amount:decimal"],
+    "observe": ["order_id:integer", "amount:text"]
+  },
+  "metriques": {"lignes_rejetees": 87, "latence_ms": 150}
+}

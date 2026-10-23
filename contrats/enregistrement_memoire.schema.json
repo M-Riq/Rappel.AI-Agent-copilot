@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Enregistrement mémoire",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signature", "cause_confirmee", "hypotheses_refutees", "correctif_essaye", "resultat", "date"],
+  "properties": {
+    "signature": {"type": "string"},
+    "cause_confirmee": {"type": "string"},
+    "hypotheses_refutees": {"type": "array", "items": {"type": "string"}},
+    "correctif_essaye": {"type": "string"},
+    "resultat": {"enum": ["reussi", "echoue"]},
+    "date": {"type": "string", "format": "date"}
+  }
+}

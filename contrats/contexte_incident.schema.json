@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contexte incident",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["incident_id", "horodatage", "signature", "logs", "commits_recents", "schema", "metriques"],
+  "properties": {
+    "incident_id": {"type": "string"},
+    "horodatage": {"type": "string", "format": "date-time"},
+    "signature": {"type": "string"},
+    "logs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["template", "compte"],
+        "properties": {
+          "template": {"type": "string"},
+          "compte": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "commits_recents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hash", "message", "date"],
+        "properties": {
+          "hash": {"type": "string"},
+          "message": {"type": "string"},
+          "date": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attendu", "observe"],
+      "properties": {
+        "attendu": {"type": "array", "items": {"type": "string"}},
+        "observe": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "metriques": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lignes_rejetees", "latence_ms"],
+      "properties": {
+        "lignes_rejetees": {"type": "integer", "minimum": 0},
+        "latence_ms": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

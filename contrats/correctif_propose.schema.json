@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Correctif proposé",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["description", "patch", "niveau_risque", "elements_touches", "reversible", "justification", "confiance"],
+  "properties": {
+    "description": {"type": "string"},
+    "patch": {"type": "string"},
+    "niveau_risque": {"enum": ["auto", "validation", "refus"]},
+    "elements_touches": {"type": "array", "items": {"type": "string"}},
+    "reversible": {"type": "boolean"},
+    "justification": {"type": "string"},
+    "confiance": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}

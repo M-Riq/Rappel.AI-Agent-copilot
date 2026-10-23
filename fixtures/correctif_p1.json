@@ -1,0 +1,9 @@
+{
+  "description": "Adapter la lecture ETL au renommage de amount en total.",
+  "patch": "--- a/orders_etl.py\n+++ b/orders_etl.py\n@@ -1 +1 @@\n-amount = row['amount']\n+amount = row['total']\n",
+  "niveau_risque": "auto",
+  "elements_touches": ["orders_etl.py"],
+  "reversible": true,
+  "justification": "Le commit a1b2c3 et le schéma observé confirment le renommage ; le type decimal est inchangé et le patch est réversible.",
+  "confiance": 0.98
+}

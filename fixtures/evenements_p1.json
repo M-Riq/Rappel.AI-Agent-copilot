@@ -1,0 +1,72 @@
+[
+  {
+    "incident_id": "p1",
+    "etape": 1,
+    "type": "hypothese",
+    "acteur": "detective",
+    "texte": "Le renommage de amount en total peut expliquer les 214 KeyError.",
+    "horodatage": "2026-10-22T10:00:01Z",
+    "modele": "fake"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 2,
+    "type": "preuve",
+    "acteur": "systeme",
+    "texte": "Le commit a1b2c3 porte le message rename amount->total.",
+    "horodatage": "2026-10-22T10:00:02Z"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 3,
+    "type": "hypothese",
+    "acteur": "sceptique",
+    "texte": "Un changement du type de amount pourrait également expliquer une incompatibilité de schéma.",
+    "horodatage": "2026-10-22T10:00:03Z",
+    "modele": "fake"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 4,
+    "type": "preuve",
+    "acteur": "systeme",
+    "texte": "Le schéma observé contient total:decimal et ne contient plus amount.",
+    "horodatage": "2026-10-22T10:00:04Z",
+    "requete_sql": "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'orders' ORDER BY ordinal_position;"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 5,
+    "type": "debat",
+    "acteur": "historien",
+    "texte": "La signature seule ne distingue pas un renommage d'un changement de type ; les preuves locales doivent primer.",
+    "horodatage": "2026-10-22T10:00:05Z",
+    "modele": "fake"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 6,
+    "type": "rejet",
+    "acteur": "sceptique",
+    "texte": "Hypothèse de changement de type réfutée : le type decimal est conservé et les erreurs portent sur une clé absente.",
+    "horodatage": "2026-10-22T10:00:06Z",
+    "modele": "fake"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 7,
+    "type": "debat",
+    "acteur": "detective",
+    "texte": "Une modification ciblée de la lecture ETL est réversible et cohérente avec le commit et le schéma.",
+    "horodatage": "2026-10-22T10:00:07Z",
+    "modele": "fake"
+  },
+  {
+    "incident_id": "p1",
+    "etape": 8,
+    "type": "decision",
+    "acteur": "systeme",
+    "texte": "Retenir le renommage comme cause et proposer le correctif de lecture de total.",
+    "horodatage": "2026-10-22T10:00:08Z"
+  }
+]
