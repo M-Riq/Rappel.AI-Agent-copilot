@@ -86,6 +86,8 @@ class LLMEnquete:
         self._budget = budget or _BudgetAppels(configuration.llm_max_appels)
         self.usage = UsageLLM(par_voie=usage_par_voie())
         self.derniere_reponse_info: dict | None = None
+        # tool_calls de la derniere reponse (appels d'outils natifs, liste vide sinon).
+        self.derniers_appels_outils: list = []
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(fournisseur={type(self.fournisseur).__name__}, usage={self.usage!r})"
@@ -110,6 +112,7 @@ class LLMEnquete:
         self.usage.nb_appels += 1
         compteur.nb_appels += 1
         self.derniere_reponse_info = None
+        self.derniers_appels_outils = []
         try:
             reponse = self._appeler_fournisseur(prompt, role, tools)
             if not isinstance(reponse, dict) or not isinstance(reponse.get("texte"), str):
@@ -121,6 +124,8 @@ class LLMEnquete:
                 raise
             raise LLMIndisponible(message_sans_secret(erreur, "Fournisseur LLM indisponible.")) from None
         texte = reponse["texte"]
+        if isinstance(reponse.get("tool_calls"), list):
+            self.derniers_appels_outils = list(reponse["tool_calls"])
         if not texte and reponse.get("tool_calls"):
             texte = json.dumps({"tool_calls": reponse["tool_calls"]}, ensure_ascii=False)
         usage = reponse.get("usage") if isinstance(reponse.get("usage"), dict) else {}

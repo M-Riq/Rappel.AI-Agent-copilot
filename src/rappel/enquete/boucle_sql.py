@@ -91,6 +91,92 @@ class ReponseCorrectif(BaseModel):
 ADAPTATEUR_CANDIDATS_SQL = TypeAdapter(Annotated[list[CandidatSql], Field(min_length=NB_HYPOTHESES_MIN)])
 
 
+# Mode appels d'outils natifs (LLM_APPEL_OUTILS=1) : la requete d'une hypothese ou d'un suivi peut
+# venir d'un tool_call run_sql ; elle passe ensuite par valider_sql comme les autres.
+NOM_OUTIL_SQL = "run_sql"
+ROLES_AVEC_OUTILS = ("hypotheses", "verdict")
+
+
+class CandidatOutil(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    texte: Texte
+    sql: str | None = None
+    categorie: str | None = None
+
+
+class SuiviOutil(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    hypothese_id: Texte
+    sql: str | None = None
+
+
+class ReponseVerdictOutil(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    verdicts: list[VerdictSql] = []
+    requetes_suivi: list[SuiviOutil] = []
+
+
+ADAPTATEUR_CANDIDATS_OUTIL = TypeAdapter(list[CandidatOutil])
+
+
+def analyser_appels_outils(appels) -> tuple[list[str], list[str]]:
+    """Extrait le SQL des tool_calls run_sql ; chaque appel illisible devient un motif de rejet."""
+    requetes, rejets = [], []
+    for appel in appels or []:
+        fonction = appel.get("function") if isinstance(appel, dict) else None
+        if not isinstance(fonction, dict):
+            rejets.append("appel d'outil illisible")
+            continue
+        if fonction.get("name") != NOM_OUTIL_SQL:
+            rejets.append(f"outil inconnu : {apercu(fonction.get('name'), 60)}")
+            continue
+        arguments = fonction.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                rejets.append("arguments JSON invalides")
+                continue
+        sql = arguments.get("sql") if isinstance(arguments, dict) else None
+        if not isinstance(sql, str) or not sql.strip():
+            rejets.append("requete vide")
+            continue
+        requetes.append(sql)
+    return requetes, rejets
+
+
+def candidats_avec_outils(texte: str, appels) -> tuple[list[CandidatOutil], list[str]]:
+    """Hypotheses du texte JSON completees, dans l'ordre, par le SQL des tool_calls."""
+    try:
+        candidats = ADAPTATEUR_CANDIDATS_OUTIL.validate_json(extraire_valeur_json(texte, list))
+    except (ValueError, ValidationError):
+        candidats = []
+    requetes, rejets = analyser_appels_outils(appels)
+    for candidat in candidats:
+        if candidat.sql is None or not candidat.sql.strip():
+            candidat.sql = requetes.pop(0) if requetes else None
+    for numero, sql in enumerate(requetes, start=len(candidats) + 1):
+        candidats.append(CandidatOutil(texte=f"Hypothese du modele n{numero} (appel run_sql)", sql=sql))
+    if len(candidats) < NB_HYPOTHESES_MIN:
+        raise ValueError("Au moins deux hypotheses attendues (texte JSON ou appels d'outil)")
+    return candidats, rejets
+
+
+def verdict_avec_outils(texte: str, appels) -> tuple[ReponseVerdict, list[str]]:
+    """Verdict JSON obligatoire ; le SQL des tool_calls complete les suivis sans requete."""
+    reponse = ReponseVerdictOutil.model_validate_json(extraire_valeur_json(texte, dict))
+    requetes, rejets = analyser_appels_outils(appels)
+    suivis = []
+    for suivi in reponse.requetes_suivi:
+        sql = suivi.sql if suivi.sql and suivi.sql.strip() else (requetes.pop(0) if requetes else None)
+        if sql is None:
+            rejets.append(f"requete de suivi sans SQL pour {suivi.hypothese_id}")
+            continue
+        suivis.append(SuiviSql(hypothese_id=suivi.hypothese_id, sql=sql))
+    rejets.extend("appel d'outil sans hypothese designee" for _ in requetes)
+    return ReponseVerdict(verdicts=reponse.verdicts, requetes_suivi=suivis), rejets
+
+
 class EtatSql(TypedDict, total=False):
     contexte: ContexteIncident | dict
     evenements: list[EvenementEnquete]
@@ -187,8 +273,10 @@ def creer_graphe_sql(
     run_sql: RunSql | None = None,
     fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
     max_tours: int = MAX_TOURS,
+    appel_outils: bool = False,
 ):
     ressources: dict[str, RunSql | None] = {"run_sql": run_sql}
+    dernier = {"appels": []}
 
     def emettre(etat: EtatSql, type_evenement: str, acteur: str, texte: str,
                 modele: str | None = None, requete_sql: str | None = None) -> None:
@@ -216,7 +304,15 @@ def creer_graphe_sql(
         etat["nb_appels_llm"] += 1
         cle = "nb_appels_profonde" if voie_pour_role(role) == "profonde" else "nb_appels_rapide"
         etat[cle] += 1
-        reponse = llm.completer(prompt, role=role)
+        dernier["appels"] = []
+        if appel_outils and role in ROLES_AVEC_OUTILS:
+            from rappel.interfaces.tools_zetaris import RUN_SQL_TOOL
+
+            reponse = llm.completer(prompt, role=role, tools=[RUN_SQL_TOOL])
+            appels = getattr(llm, "derniers_appels_outils", None)
+            dernier["appels"] = list(appels) if isinstance(appels, list) else []
+        else:
+            reponse = llm.completer(prompt, role=role)
         info = getattr(llm, "derniere_reponse_info", None)
         modele = info.get("modele_repondu") if isinstance(info, dict) else None
         return reponse, modele if isinstance(modele, str) and modele.strip() else None
@@ -320,17 +416,25 @@ def creer_graphe_sql(
             + json.dumps(refutees, ensure_ascii=False)
             + "\nRetourne UNIQUEMENT un tableau JSON d'objets "
             "{\"texte\": string, \"sql\": string, \"categorie\": string}."
+            + (" Tu peux aussi appeler l'outil run_sql : chaque appel fournit, dans l'ordre, la requete "
+               "d'une hypothese du tableau sans champ sql." if appel_outils else "")
         )
         donnees = {"signature": contexte.signature, "resume": resume_contexte(contexte),
                    "hypotheses_refutees": refutees}
-        candidats, modele = demander(
-            etat, "hypotheses", consignes, donnees,
-            lambda reponse: ADAPTATEUR_CANDIDATS_SQL.validate_json(extraire_valeur_json(reponse, list)),
-        )
+
+        def analyser(reponse):
+            if appel_outils:
+                return candidats_avec_outils(reponse, dernier["appels"])
+            return ADAPTATEUR_CANDIDATS_SQL.validate_json(extraire_valeur_json(reponse, list)), []
+
+        analyse, modele = demander(etat, "hypotheses", consignes, donnees, analyser)
         hypotheses, categories = [], {}
         etat.update(hypotheses=hypotheses, categories=categories)
-        if candidats is None:
+        if analyse is None:
             return etat
+        candidats, rejets_outils = analyse
+        for raison in rejets_outils:
+            emettre(etat, "rejet", "systeme", f"Appel d'outil run_sql rejete : {raison}", modele)
         connues = {cle_texte(texte) for texte in refutees}
         for indice, candidat in enumerate(candidats, start=1):
             if cle_texte(candidat.texte) in connues:
@@ -344,6 +448,10 @@ def creer_graphe_sql(
             hypotheses.append(hypothese)
             categories[hypothese.id] = candidat.categorie
             emettre(etat, "hypothese", "detective", hypothese.texte, modele)
+            if not candidat.sql:
+                emettre(etat, "rejet", "systeme",
+                        f"Aucune requete SQL fournie pour '{hypothese.texte}' (ni texte ni appel d'outil)", modele)
+                continue
             executer_requete(etat, hypothese, candidat.sql, "hypothese", modele)
             etat["nb_hypotheses_testees"] += 1
         if not hypotheses:
@@ -376,12 +484,17 @@ def creer_graphe_sql(
                 "souvenirs": [graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]],
                 "suivis_restants": MAX_REQUETES_SUIVI - suivis_utilises,
             }
-            reponse, modele = demander(
-                etat, "verdict", consignes, donnees,
-                lambda texte: ReponseVerdict.model_validate_json(extraire_valeur_json(texte, dict)),
-            )
-            if reponse is None:
+            def analyser_verdict(texte):
+                if appel_outils:
+                    return verdict_avec_outils(texte, dernier["appels"])
+                return ReponseVerdict.model_validate_json(extraire_valeur_json(texte, dict)), []
+
+            analyse, modele = demander(etat, "verdict", consignes, donnees, analyser_verdict)
+            if analyse is None:
                 break
+            reponse, rejets_outils = analyse
+            for raison in rejets_outils:
+                emettre(etat, "rejet", "systeme", f"Appel d'outil run_sql rejete : {raison}", modele)
             suivis = [suivi for suivi in reponse.requetes_suivi if suivi.hypothese_id in par_id]
             suivis = suivis[:MAX_REQUETES_SUIVI - suivis_utilises]
             if suivis:

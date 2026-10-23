@@ -112,6 +112,16 @@ c_initiale = min(CONFIANCE_MAX = 0.95, 0.45 x nombre de requetes citees a result
 c_finale   = formule inchangee de AbstentionSeuil (seuil 0,6, +0,1 si nb_sources >= 2, +0,1 si incident similaire)
 ```
 
+Appels d'outils natifs (`LLM_APPEL_OUTILS=1`, defaut `0`) : pour les roles `hypotheses` et
+`verdict`, la boucle passe `tools=[RUN_SQL_TOOL]` (de `tools_zetaris`) et accepte, en plus du
+JSON texte, des `tool_calls` dont `function.arguments` est un JSON avec `"sql"`. Le SQL d'un appel
+complete, dans l'ordre, les hypotheses du tableau sans champ `sql` (ou les `requetes_suivi` sans
+`sql` du verdict) ; s'il n'y a aucun texte, chaque appel devient une hypothese libellee
+« Hypothese du modele nN (appel run_sql) ». Toute requete passe par `valider_sql`. Un outil
+inconnu, des arguments illisibles, une requete vide ou un appel sans hypothese designee donnent
+un evenement `rejet` explicite (« Appel d'outil run_sql rejete : ... »), jamais une exception ;
+plusieurs instructions sont refusees par `valider_sql`. Le mode par defaut est inchange.
+
 Plafond : `max_tours` vaut `Configuration.max_tours_enquete` (MAX_TOURS_ENQUETE) par defaut. S'il est atteint avant la conclusion, evenement `decision`
 « Plafond de N tours atteint : appel ... non effectue, abstention sans correctif »
 (N = valeur reelle), puis abstention dont `manque` contient
@@ -293,6 +303,7 @@ modele `.env.example`, aucun secret suivi) :
 | `SEUIL_ABSTENTION` | `seuil_abstention` | Seuil unique de `decider` et `AbstentionSeuil` (0,6) |
 | `MAX_TOURS_ENQUETE` | `max_tours_enquete` | Plafond de tours de la boucle sql (6) |
 | `LLM_MAX_APPELS` | `llm_max_appels` | Plafond d'appels LLM par execution, relances comprises (20) |
+| `LLM_APPEL_OUTILS` | `appel_outils` | `0` (defaut) : requetes dans le JSON du texte ; `1` : appels d'outils natifs `run_sql` acceptes en plus |
 
 Variables hors configuration unique, conservees pour des briques optionnelles :
 `WAR_ROOM_*` (war room, hors MVP, desactivee par defaut) et `LANGFUSE_*` (traceur optionnel).

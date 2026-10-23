@@ -376,6 +376,7 @@ def enqueter(
     run_sql: RunSql | None = None,
     max_tours: int | None = None,
     fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
+    appel_outils: bool | None = None,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
@@ -384,7 +385,9 @@ def enqueter(
         raise ValueError("mode_preuves doit etre sql ou outils")
     from . import boucle_sql
 
-    max_tours = charger().max_tours_enquete if max_tours is None else max_tours
+    configuration = charger()
+    max_tours = configuration.max_tours_enquete if max_tours is None else max_tours
+    appel_outils = configuration.appel_outils if appel_outils is None else appel_outils
     if max_tours < 1:
         raise ValueError("max_tours doit etre superieur ou egal a 1")
     config_debat = war_room.configuration(war_room_active, war_room_max_tours, war_room_max_appels_llm)
@@ -425,7 +428,7 @@ def enqueter(
         else:
             graphe_sql, ressources = boucle_sql.creer_graphe_sql(
                 memoire, llm, abstention, sur_evenement=transmettre, run_sql=run_sql,
-                fabrique_run_sql=fabrique_run_sql, max_tours=max_tours,
+                fabrique_run_sql=fabrique_run_sql, max_tours=max_tours, appel_outils=appel_outils,
             )
             etat = graphe_sql.invoke(boucle_sql.etat_initial_sql(contexte, resultat))
             fermer_backend = getattr(ressources["run_sql"], "fermer", None)

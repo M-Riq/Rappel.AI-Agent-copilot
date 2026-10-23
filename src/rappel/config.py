@@ -30,6 +30,8 @@ class Configuration:
     seuil_abstention: float = 0.6
     max_tours_enquete: int = 6
     llm_max_appels: int = 20
+    # Appels d'outils natifs (tool_calls run_sql) ; 0 = JSON dans le texte (defaut).
+    appel_outils: bool = False
     api_url: str = "http://127.0.0.1:8000"
 
     def __post_init__(self):
@@ -48,12 +50,23 @@ class Configuration:
             raise ValueError("LLM_MAX_APPELS doit être positif.")
 
 
+def _booleen(nom, valeur):
+    valeur = valeur.strip().lower()
+    if valeur in ("", "0", "false", "non", "no"):
+        return False
+    if valeur in ("1", "true", "oui", "yes"):
+        return True
+    raise ValueError(f"{nom} doit valoir 0 ou 1.")
+
+
 def charger() -> Configuration:
     valeurs = {
         nom: os.environ[nom.upper()]
         for nom in Configuration.__dataclass_fields__
         if nom.upper() in os.environ
     }
+    if "LLM_APPEL_OUTILS" in os.environ:
+        valeurs["appel_outils"] = _booleen("LLM_APPEL_OUTILS", os.environ["LLM_APPEL_OUTILS"])
     for nom, convertir in (
         ("seuil_abstention", float),
         ("max_tours_enquete", int),
