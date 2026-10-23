@@ -111,3 +111,51 @@ avec sous-requete, `JOIN ... ON`, `ORDER BY`, `count(*)`, CTE `WITH`.
   (`CLE_SQL_CORPS` dans `tools_zetaris.py`).
 - Verifier le dialecte (types `TEXT/INTEGER/REAL`, `LIKE` sensible a la casse).
 - Rejouer `tests/test_run_sql.py` contre une instance reelle.
+
+## 8. Portabilite SQL (dialecte Zetaris inconnu)
+
+`lister_constructions_non_portables(sql)` ([run_sql.py](../src/rappel/interfaces/run_sql.py))
+signale, hors chaines et commentaires, les constructions propres a SQLite ou hors norme ISO,
+avec leur equivalent standard :
+
+| Construction | Remplacement standard |
+| --- | --- |
+| `IFNULL` | COALESCE(x, y) |
+| `GROUP_CONCAT` | STRING_AGG / LISTAGG selon le moteur (a eviter) |
+| `STRFTIME` | EXTRACT(... FROM x) ou CAST |
+| `JULIANDAY` | differences de dates via CAST / INTERVAL |
+| `DATETIME()` | CAST(x AS TIMESTAMP) |
+| `DATE()` | CAST(x AS DATE) |
+| `SUBSTR` | SUBSTRING(x FROM debut FOR longueur) |
+| `INSTR` | POSITION(motif IN x) |
+| `PRINTF` | concatenation || et CAST |
+| `TYPEOF` | aucun equivalent : ne pas utiliser |
+| `GLOB` | LIKE |
+| `RANDOM()` | aucun equivalent portable : ne pas utiliser |
+| `ROWID` | cle explicite de la table |
+| `SQLITE_*` | aucun equivalent : ne pas utiliser |
+| `!=` | <> |
+| `LIMIT` | garde : a confirmer avec Zetaris |
+
+Controle des requetes du depot (test `test_requetes_types_et_du_faux_portables`) :
+
+| Requete | Constructions non portables |
+| --- | --- |
+| requete type « ecart de schema » | aucune |
+| requete type « logs au compte eleve » | aucune |
+| requete type « commits recents » | aucune |
+| requete type « metriques » | aucune |
+| LLM faux : Le schema des donnees a change | aucune |
+| LLM faux : Saturation des ressources | aucune |
+| LLM faux : Probleme reseau ou timeout | aucune |
+| LLM faux : Changement de configuration | aucune |
+
+Aucune construction propre a SQLite n'est utilisee : rien n'a du etre remplace. Elles
+n'emploient que `SELECT`, `WHERE`, `JOIN ... ON`, `UNION ALL`, `NOT IN (sous-requete)`, `LIKE`,
+`LOWER`, `<>`, `ORDER BY` et `NULL AS colonne`. Restent a confirmer avec Zetaris :
+`LIMIT` (ajoute par le garde-fou ; la norme ISO ecrit `FETCH FIRST n ROWS ONLY`), les noms de
+colonnes `date` et `type` (mots reserves dans certains moteurs : a citer ou renommer cote vues
+Zetaris), le typage de `NULL AS colonne` dans un `UNION ALL` et la sensibilite de `LIKE` a la casse.
+
+Un bloc Markdown ```sql ... ``` autour d'une requete du modele est retire avant validation ;
+le SQL execute (et renvoye dans `requete_sql`) est la requete nettoyee.

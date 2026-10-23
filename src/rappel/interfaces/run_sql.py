@@ -198,9 +198,51 @@ def _limite_au_premier_niveau(jetons: list[str]) -> bool:
     return False
 
 
+def retirer_bloc_markdown(sql: str) -> str:
+    """Retire un bloc ```sql ... ``` qu'un modele place souvent autour de sa requete."""
+    texte = sql.strip()
+    bloc = re.fullmatch(r"```[A-Za-z]*\s*(.*?)\s*```", texte, re.DOTALL)
+    return bloc.group(1).strip() if bloc else texte
+
+
+# Constructions propres a SQLite (ou hors norme ISO) et equivalent standard, pour un dialecte
+# Zetaris encore inconnu. LIMIT est garde (ajoute par le garde-fou) mais reste a confirmer.
+CONSTRUCTIONS_NON_PORTABLES = (
+    ("IFNULL", r"\bifnull\s*\(", "COALESCE(x, y)"),
+    ("GROUP_CONCAT", r"\bgroup_concat\s*\(", "STRING_AGG / LISTAGG selon le moteur (a eviter)"),
+    ("STRFTIME", r"\bstrftime\s*\(", "EXTRACT(... FROM x) ou CAST"),
+    ("JULIANDAY", r"\bjulianday\s*\(", "differences de dates via CAST / INTERVAL"),
+    ("DATETIME()", r"\bdatetime\s*\(", "CAST(x AS TIMESTAMP)"),
+    ("DATE()", r"\bdate\s*\(", "CAST(x AS DATE)"),
+    ("SUBSTR", r"\bsubstr\s*\(", "SUBSTRING(x FROM debut FOR longueur)"),
+    ("INSTR", r"\binstr\s*\(", "POSITION(motif IN x)"),
+    ("PRINTF", r"\bprintf\s*\(", "concatenation || et CAST"),
+    ("TYPEOF", r"\btypeof\s*\(", "aucun equivalent : ne pas utiliser"),
+    ("GLOB", r"\bglob\b", "LIKE"),
+    ("RANDOM()", r"\brandom\s*\(", "aucun equivalent portable : ne pas utiliser"),
+    ("ROWID", r"\browid\b", "cle explicite de la table"),
+    ("SQLITE_*", r"\bsqlite_\w+", "aucun equivalent : ne pas utiliser"),
+    ("!=", r"!=", "<>"),
+    ("LIMIT", r"\blimit\b", None),
+)
+
+
+def lister_constructions_non_portables(sql: str) -> list[dict]:
+    """Constructions propres a SQLite hors chaines et commentaires ; remplacement None = a confirmer."""
+    try:
+        _, squelette = _retirer_commentaires_et_chaines(retirer_bloc_markdown(sql))
+    except _RequeteRefusee:
+        squelette = sql
+    return [
+        {"construction": nom, "remplacement": remplacement}
+        for nom, motif, remplacement in CONSTRUCTIONS_NON_PORTABLES
+        if re.search(motif, squelette, re.IGNORECASE)
+    ]
+
+
 def valider_sql(sql: str, tables_autorisees) -> ValidationSql:
     """Garde-fous communs a tous les backends : lecture seule, une instruction, liste blanche."""
-    soumis = sql.strip() if isinstance(sql, str) else ""
+    soumis = retirer_bloc_markdown(sql) if isinstance(sql, str) else ""
     try:
         if not soumis:
             raise _RequeteRefusee("requete vide")
