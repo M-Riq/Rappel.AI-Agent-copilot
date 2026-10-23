@@ -34,6 +34,8 @@ class Configuration:
     appel_outils: bool = False
     # Pipeline de demo isole (Module B) : seul dossier que l'action peut modifier.
     pipeline_demo_dir: str = "data/pipeline_demo"
+    # Execution reelle d'un correctif accepte sur le pipeline de demo (jamais ailleurs) ; 0 par defaut.
+    action_reelle_demo: bool = False
     # Rayon d'impact (B8) : auto / validation / refus.
     rayon_seuil_auto: float = 0.9
     rayon_seuil_validation: float = 0.6
@@ -78,6 +80,8 @@ def charger() -> Configuration:
     }
     if "LLM_APPEL_OUTILS" in os.environ:
         valeurs["appel_outils"] = _booleen("LLM_APPEL_OUTILS", os.environ["LLM_APPEL_OUTILS"])
+    if "ACTION_REELLE_DEMO" in os.environ:
+        valeurs["action_reelle_demo"] = _booleen("ACTION_REELLE_DEMO", os.environ["ACTION_REELLE_DEMO"])
     for nom, convertir in (
         ("seuil_abstention", float),
         ("max_tours_enquete", int),

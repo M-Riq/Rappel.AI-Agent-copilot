@@ -373,11 +373,27 @@ def creer_app(
             resultat = etat["resultat"] if etat else None
             if resultat is not None and resultat.correctif is not None:
                 decisions[identifiant] = decision.decision
-                ajouter_decision(identifiant, etat, f"Décision humaine : {decision.decision} ; aucun patch exécuté")
-                return {
-                    "id": identifiant, "decision": decision.decision, "execute": False,
-                    "message": "Décision enregistrée ; aucun patch exécuté par l'API.",
-                }
+                correctif = resultat.correctif
+                if not (charger().action_reelle_demo and decision.decision == "appliquer"):
+                    ajouter_decision(identifiant, etat, f"Décision humaine : {decision.decision} ; aucun patch exécuté")
+                    return {
+                        "id": identifiant, "decision": decision.decision, "execute": False,
+                        "message": "Décision enregistrée ; aucun patch exécuté par l'API.",
+                    }
+        if resultat is not None and resultat.correctif is not None:
+            # ACTION_REELLE_DEMO=1 : execution sur le pipeline de demo isole uniquement.
+            from rappel.action.executeur import EXECUTE, executer_correctif
+
+            with verrou_execution:
+                action = executer_correctif(correctif, decision.decision)
+            with verrou:
+                ajouter_decision(identifiant, etat, f"Décision humaine : appliquer ; action sur le pipeline de démo : "
+                                 f"{action['statut']} ({action['message']})")
+            return {
+                "id": identifiant, "decision": decision.decision, "execute": action["statut"] == EXECUTE,
+                "message": action["message"], "action": action,
+            }
+        with verrou:
             if identifiant == "p1" and charger().llm_provider == "fake":
                 decisions[identifiant] = decision.decision
                 return {
