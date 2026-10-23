@@ -1,0 +1,2 @@
+# Fixtures générées par scripts/generer_fixtures_partagees.py : octets identiques sur tout clone.
+fixtures/moteur/*.json text eol=lf

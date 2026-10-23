@@ -60,9 +60,31 @@ Le squelette de l'équipe (M-Riq, Juan, agent Copilot) date du 22-23 octobre
 | `1f3e22c` | 23/10 15:40 | Robustesse aux réponses réelles du modèle, contrôle de portabilité SQL |
 | `c937de1` | 23/10 15:46 | Secours JSON automatique de la mémoire Postgres, `scripts/check_postgres.py` |
 | `c1a0b90` | 23/10 15:49 | Route `GET /comparaison` (P1 contre P2) |
-| commit suivant | 23/10 | Documentation de finition du Module A |
+| `bffad77` | 23/10 15:59 | Documentation de finition du Module A |
 
-## 5. Ce qui n'a pas été repris
+## 5. Compléments modules A/B/C et pilotage (branche `naomy/complement-modules`, 23 octobre 2026)
+
+Écrits par Naomy avec un assistant de code, y compris des parties attribuées à Juan (pipeline
+de démo, ingestion, action, rayon d'impact) et à Riq (interface, dossier de soumission) dans le
+README : à relire par eux avant fusion. Tout fonctionne en mode simulé ; rien n'a été exécuté
+contre Nightshift, Zetaris ou Postgres réels.
+
+| Commit | Date | Contenu |
+| --- | --- | --- |
+| `b70d7e5` | 23/10 16:55 | Pipeline de demo isole et injecteur P1/P2/P3 |
+| `676f2a4` | 23/10 17:12 | Construction du ContexteIncident |
+| `9bbfdd8` | 23/10 17:25 | Rayon d'impact auto/validation/refus |
+| `97bd4dc` | 23/10 17:48 | Action avec sauvegarde, annulation et refus |
+| `b392031` | 23/10 17:51 | Incident construit depuis le pipeline de demo |
+| `a03f111` | 23/10 18:05 | Recette globale G1-G4 |
+| `59dac9e` | 23/10 18:39 | Dossier de soumission et scan des secrets |
+| `b9b362c` | 23/10 18:59 | Interface Streamlit en trois zones |
+| `2d86978` | 23/10 19:06 | Traces Langfuse optionnelles |
+| `22bbea6` | 23/10 19:18 | Scripts de preparation de la machine de demo |
+| `7cf1ded` | 23/10 19:26 | Pilotage : acces, decisions, preuves sponsors |
+| commit suivant | 23/10 | Parcours de démarrage vérifié (`scripts/test_demarrage_propre.py`, `.gitattributes`) |
+
+## 6. Ce qui n'a pas été repris
 
 - Adaptateurs NVIDIA et Claude, secours entre fournisseurs, variables `NIGHTSHIFT_*` et
   `RUN_SQL_BACKEND` : l'équipe passe uniquement par Meterless et par sa configuration.

@@ -37,6 +37,10 @@ python scripts/recette_globale.py
 uvicorn rappel.api:app --app-dir src
 ```
 
+Parcours vérifié sur un clone propre par `python scripts/test_demarrage_propre.py` (hors ligne :
+l'installation `pip` n'y est pas testée, seulement l'importabilité des paquets ; l'API enchaîne
+P1, P2 et P3 en mode simulé ; environ 2 minutes, objectif < 15 min).
+
 ## Installation et commandes
 
 ```bash
