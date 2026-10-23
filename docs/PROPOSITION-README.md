@@ -46,8 +46,15 @@ uvicorn rappel.api:app --app-dir src       # API locale
 python scripts/demo_enquete.py             # P1, P2, P3 : métriques et contrôle de santé
 python scripts/verifier_pret.py            # configuration, sécurité du dépôt, démo à blanc
 python scripts/recette_module_a.py         # recette A1-A15 du Module A (data/recette.json)
-streamlit run ui/app.py                    # interface P1
+streamlit run ui/app.py                    # interface P1 ; page « Enquête en direct » (trois zones)
 ```
+
+Interface (thème sombre, `.streamlit/config.toml`) : zone 1 injecte une panne dans le pipeline de
+démo isolé et crée l'incident (3 enquêtes au plus par session) ; zone 2 suit le fil en direct
+(type d'événement, requête SQL sous chaque preuve, badge « Nemotron via Meterless » seulement
+pour un modèle réel renvoyé par le service, « simulé » sinon) ; zone 3 affiche le résultat, la
+décision et le compteur P1/P2 (durée indicative). La logique est dans `ui/logique.py` (testée
+sans Streamlit).
 
 Machine de démonstration : `pip install -r requirements-demo.txt` (psycopg),
 `docker compose up -d postgres`, puis dans `.env` : `LLM_PROVIDER=meterless`,

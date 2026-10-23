@@ -112,6 +112,12 @@ def main():
         st.warning("API coupée ou indisponible : affichage des événements de la fixture locale.")
     for evenement in trier_evenements(evenements):
         afficher_evenement(evenement)
+    # Désactivé par défaut : la vue P1 ci-dessus reste celle du squelette.
+    if st.toggle("Enquête en direct (trois zones)", value=False):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import zones
+
+        zones.afficher(configuration.api_url)
 
 
 if __name__ == "__main__":
