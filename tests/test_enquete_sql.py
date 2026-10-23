@@ -108,7 +108,8 @@ def test_a5_colonne_renommee_et_correctif_valide(p1):
     assert correctif is not None
     assert CorrectifPropose.model_validate(correctif.model_dump()) == correctif
     assert "colonne renommée" in correctif.justification
-    assert correctif.niveau_risque == "validation" and correctif.reversible
+    # Rayon d'impact (B8) : reversible, un seul element non critique, confiance 1.0 -> auto.
+    assert correctif.niveau_risque == "auto" and correctif.reversible
     patch = json.loads(correctif.patch)
     assert patch["apres"] == contexte.schema.attendu and patch["avant"] == contexte.schema.observe
     assert correctif.elements_touches == [contexte.signature.partition(":")[2]]

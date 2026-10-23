@@ -1,7 +1,7 @@
 {
   "description": "Restaurer le schema attendu de orders_etl: order_id:integer, amount:decimal",
   "patch": "{\n  \"composant\": \"orders_etl\",\n  \"avant\": [\n    \"order_id:integer\",\n    \"total:decimal\"\n  ],\n  \"apres\": [\n    \"order_id:integer\",\n    \"amount:decimal\"\n  ]\n}",
-  "niveau_risque": "validation",
+  "niveau_risque": "auto",
   "elements_touches": [
     "orders_etl"
   ],

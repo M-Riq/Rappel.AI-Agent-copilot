@@ -34,6 +34,11 @@ class Configuration:
     appel_outils: bool = False
     # Pipeline de demo isole (Module B) : seul dossier que l'action peut modifier.
     pipeline_demo_dir: str = "data/pipeline_demo"
+    # Rayon d'impact (B8) : auto / validation / refus.
+    rayon_seuil_auto: float = 0.9
+    rayon_seuil_validation: float = 0.6
+    rayon_max_elements: int = 3
+    rayon_elements_critiques: str = "production,paiement,facturation,securite"
     api_url: str = "http://127.0.0.1:8000"
 
     def __post_init__(self):
@@ -50,6 +55,10 @@ class Configuration:
             raise ValueError("MAX_TOURS_ENQUETE doit être positif.")
         if self.llm_max_appels < 1:
             raise ValueError("LLM_MAX_APPELS doit être positif.")
+        if not 0 <= self.rayon_seuil_validation <= self.rayon_seuil_auto <= 1:
+            raise ValueError("RAYON_SEUIL_VALIDATION et RAYON_SEUIL_AUTO doivent vérifier 0 <= validation <= auto <= 1.")
+        if self.rayon_max_elements < 1:
+            raise ValueError("RAYON_MAX_ELEMENTS doit être positif.")
 
 
 def _booleen(nom, valeur):
@@ -73,6 +82,9 @@ def charger() -> Configuration:
         ("seuil_abstention", float),
         ("max_tours_enquete", int),
         ("llm_max_appels", int),
+        ("rayon_seuil_auto", float),
+        ("rayon_seuil_validation", float),
+        ("rayon_max_elements", int),
     ):
         if nom in valeurs:
             valeurs[nom] = convertir(valeurs[nom])

@@ -15,6 +15,7 @@ from rappel.enquete.modeles import (
 from rappel.enquete.protocoles import (
     LLM, MARQUEUR_DONNEES, Abstention, DecisionAbstention, Memoire, RunSql, voie_pour_role,
 )
+from rappel.action.rayon_impact import evaluer_rayon_impact
 from rappel.interfaces.run_sql import LIMITE_LIGNES, TABLES, creer_run_sql, valider_sql
 from . import graphe
 
@@ -673,6 +674,8 @@ def creer_graphe_sql(
                 reversible=reponse.reversible, justification=justification,
                 confiance=min(reponse.confiance, decision.confiance),
             )
+            # Rayon d'impact calcule par le code (B8), jamais par le modele.
+            correctif = correctif.model_copy(update={"niveau_risque": evaluer_rayon_impact(correctif)})
         except ValidationError:
             return renoncer(etat, "correctif invalide")
         etat["correctif"] = correctif
