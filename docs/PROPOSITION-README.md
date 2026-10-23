@@ -16,10 +16,26 @@ Le moteur d'enquête est intégré au squelette Phase 0/1 :
   valider, ou abstention. Plafond de tours (`MAX_TOURS_ENQUETE`) et d'appels (`LLM_MAX_APPELS`).
 - **LLM** : Meterless Nightshift uniquement (lanes rapide et profonde Nemotron), `FakeLLM` hors ligne.
 - **Preuves** : `SOURCE_PROVIDER=fichier` (base SQLite simulée construite depuis le contexte,
-  affichée « simule-sqlite ») ou `zetaris` (REST, une requête par preuve).
+  affichée « simule-sqlite ») ou `zetaris` (Zetaris via API REST, une requête par preuve).
 - **Mémoire** : JSON en développement, Postgres en démo ; les hypothèses réfutées ne sont pas
   retestées sur un incident de même signature.
 - **API** : contrat du squelette conservé ; `POST /incidents` lance l'enquête en arrière-plan.
+
+## Démarrage rapide
+
+Mode simulé, sans réseau ni clé (Windows : `.venv\Scripts\activate`, `copy` au lieu de `cp`) :
+
+```bash
+git clone <url-du-depot> rappel && cd rappel
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+pytest --ignore=tests/test_ui.py
+python scripts/demo_enquete.py
+python scripts/incident_depuis_demo.py --scenario p1 --local
+python scripts/recette_globale.py
+uvicorn rappel.api:app --app-dir src
+```
 
 ## Installation et commandes
 
@@ -41,16 +57,18 @@ Machine de démonstration : `pip install -r requirements-demo.txt` (psycopg),
 Si Postgres est injoignable, la mémoire bascule sur le JSON local et l'API l'affiche
 (`memoire_mode_effectif`, `memoire_mode` : `fallback-json`).
 
-## Modes
+## Modes simulé et réel
 
-| Mode | Valeurs | Défaut |
+| Réglage | Simulé (défaut) | Réel (machine de démo) |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `fake`, `meterless` | `fake` |
-| `SOURCE_PROVIDER` | `fichier`, `zetaris` | `fichier` |
-| `MEMOIRE_PROVIDER` | `json`, `postgres` | `json` |
+| `LLM_PROVIDER` | `fake` | `meterless` (Nightshift, Nemotron) |
+| `SOURCE_PROVIDER` | `fichier` (SQLite en mémoire) | `zetaris` (Zetaris via API REST) |
+| `MEMOIRE_PROVIDER` | `json` | `postgres` (secours JSON automatique) |
+| `ACTION_REELLE_DEMO` | `0` (aucune modification) | `1` : applique le correctif au pipeline de démo isolé |
 
-En mode `fake` ou `fichier`, tout est simulé et l'API le dit (`enquete_simulee`,
-`preuves_simulees`) : ce n'est pas une preuve sponsor.
+En mode simulé, l'API et les scripts le disent (`enquete_simulee`, `preuves_simulees`,
+« simulé » dans les recettes) : ce n'est pas une preuve sponsor. Les appels réels exigent
+`--confirmer` dans les scripts.
 
 ## Limites honnêtes
 
@@ -58,6 +76,8 @@ En mode `fake` ou `fichier`, tout est simulé et l'API le dit (`enquete_simulee`
   le corps REST Zetaris et l'exposition des tables du moteur restent à confirmer.
 - Les seuils (abstention 0,6) sont calibrés sur trois scénarios et des perturbations
   synthétiques ; la confiance est un score heuristique.
-- API locale sans authentification, sans persistance des incidents ; elle n'exécute aucun patch.
+- API locale sans authentification, sans persistance des incidents ; elle n'applique un correctif
+  qu'au pipeline de démo isolé (`PIPELINE_DEMO_DIR`), avec sauvegarde, et seulement si
+  `ACTION_REELLE_DEMO=1`.
 - La stabilité avec un vrai modèle (même conclusion 4 fois sur 5) reste à mesurer.
-- Origine du code : voir `docs/ORIGINE-DU-CODE.md`.
+- Origine du code : voir `docs/ORIGINE-DU-CODE.md` ; dossier de soumission : `docs/SOUMISSION.md`.
