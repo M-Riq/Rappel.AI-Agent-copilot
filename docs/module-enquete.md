@@ -236,17 +236,20 @@ Ni contexte brut, prompts, en-tetes, cles ni objets de correctif ne sont transmi
 separement. Les textes peuvent toutefois contenir des extraits de logs/commits.
 `LANGFUSE_ENVOYER_TEXTES=0` retire completement le texte des evenements transmis.
 
-**Code pret, activation avec les cles, liaison au SDK a verifier.** Actuellement,
-`_AdaptateurLangfuseSDK` est volontairement non implemente : meme si le paquet
-est installe et les cles presentes, la factory revient au traceur nul tant que
-cette classe n'est pas branchee. Aucune trace distante n'est garantie a ce stade.
-Apres installation manuelle, verifier la version et son code/documentation pour :
-construction/authentification du client et option host, creation d'une trace racine,
-association des evenements a cette trace, mise a jour/finalisation avec metriques
-et decision, export/flush/fermeture et erreurs synchrones ou asynchrones.
-Verifier aussi les donnees effectivement envoyees et desactiver tout enrichissement
-automatique qui transmettrait d'autres donnees. Concentrer ces appels dans cette
-seule classe, sans deviner les noms du SDK.
+**Liaison SDK optionnelle, non verifiee contre un vrai serveur.** `_AdaptateurLangfuseSDK`
+importe `langfuse` a la demande (aucun paquet ajoute au projet) et construit
+`Langfuse(public_key, secret_key[, host])`. Il detecte la generation du SDK :
+v3 (`start_span`, puis `create_event` ou un span enfant par evenement, `update(output)`
+et `end()`), v2 (`trace`, `event`, `update(output)`), puis `flush()`. Un SDK non reconnu,
+un constructeur en echec ou un paquet absent donnent `TraceurNul` avec un seul avertissement
+generique (« Tracage Langfuse inactif ») ; actif, un message d'information cite seulement la
+version du SDK. Les cles ne sont ni conservees par l'adaptateur ni journalisees. Teste avec
+de faux modules v2/v3 (`tests/test_traceur_langfuse.py`) ; reste a verifier avec le paquet
+installe et un serveur Langfuse : authentification, `host`, envoi effectif (`flush`) et
+donnees reellement visibles dans l'interface Langfuse.
+
+Variables (vides par defaut dans `.env.example`) : `LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`, `LANGFUSE_ENVOYER_TEXTES` (1 par defaut).
 
 ### Metriques
 

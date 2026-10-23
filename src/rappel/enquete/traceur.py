@@ -58,18 +58,54 @@ class TraceurProtege:
 
 
 class _AdaptateurLangfuseSDK:
-    # A verifier dans la documentation et le code de la version installee.
+    """Liaison défensive au SDK Langfuse : v3 (``start_span``) ou v2 (``trace``).
+
+    Les clés sont transmises au constructeur du SDK et jamais conservées ni journalisées ici.
+    Toute erreur remonte au TraceurLangfuse, qui la compte et l'assainit.
+    """
+
     def __init__(self, module, public_key: str, secret_key: str, host: str) -> None:
-        raise NotImplementedError("Liaison SDK Langfuse non verifiee")
+        options = {"public_key": public_key, "secret_key": secret_key}
+        if host:
+            options["host"] = host
+        self._client = module.Langfuse(**options)
+        if hasattr(self._client, "start_span"):
+            self.version = "v3"
+        elif hasattr(self._client, "trace"):
+            self.version = "v2"
+        else:
+            raise RuntimeError("SDK Langfuse non reconnu")
+        self._racine = None
 
     def demarrer(self, donnees: dict) -> None:
-        raise NotImplementedError
+        nom = f"enquete {donnees.get('incident_id', '')}".strip()
+        if self.version == "v3":
+            self._racine = self._client.start_span(name=nom, input=donnees, metadata=donnees)
+        else:
+            self._racine = self._client.trace(name=nom, input=donnees, metadata=donnees)
 
     def evenement(self, donnees: dict) -> None:
-        raise NotImplementedError
+        if self._racine is None:
+            raise RuntimeError("trace non démarrée")
+        nom = f"{donnees.get('etape', '?')} {donnees.get('type', 'evenement')}"
+        if self.version == "v2":
+            self._racine.event(name=nom, metadata=donnees)
+        elif hasattr(self._racine, "create_event"):
+            self._racine.create_event(name=nom, metadata=donnees)
+        else:
+            enfant = self._racine.start_span(name=nom, metadata=donnees)
+            enfant.end()
 
     def terminer(self, donnees: dict) -> None:
-        raise NotImplementedError
+        racine, self._racine = self._racine, None
+        try:
+            if racine is not None:
+                racine.update(output=donnees)
+                if self.version == "v3":
+                    racine.end()
+        finally:
+            if hasattr(self._client, "flush"):
+                self._client.flush()
 
 
 class TraceurLangfuse(TraceurProtege):
@@ -127,6 +163,7 @@ def creer_traceur() -> Traceur:
             return TraceurNul()
         module = importlib.import_module("langfuse")
         client = _AdaptateurLangfuseSDK(module, public_key, secret_key, host)
+        LOGGER.info("Tracage Langfuse actif (SDK %s).", client.version)
         return TraceurLangfuse(client)
     except Exception:
         _avertir_configuration()
