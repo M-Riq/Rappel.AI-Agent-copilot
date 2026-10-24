@@ -68,8 +68,15 @@ def sql_a_afficher(evenement: dict) -> str | None:
     return None
 
 
+LONGUEUR_MAX_TEXTE = 5000
+
+
 def texte_evenement(evenement: dict) -> str:
-    return str(evenement.get("texte", evenement.get("message", evenement.get("contenu", ""))))
+    """Texte affiché d'un événement, borné pour qu'un texte géant ne fige pas l'interface."""
+    texte = str(evenement.get("texte", evenement.get("message", evenement.get("contenu", ""))))
+    if len(texte) > LONGUEUR_MAX_TEXTE:
+        return texte[:LONGUEUR_MAX_TEXTE] + f"… [{len(texte) - LONGUEUR_MAX_TEXTE} caractères masqués]"
+    return texte
 
 
 def _etape(evenement: dict) -> float:
