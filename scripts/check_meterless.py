@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 import sys
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rappel.config import charger
@@ -22,8 +24,8 @@ def main(argv=None):
         configuration = charger()
         llm = MeterlessLLM(configuration)
         connexion = llm.tester_connexion()
-    except (RuntimeError, ValueError):
-        print("Erreur de configuration du Runtime Meterless.")
+    except (requests.RequestException, RuntimeError, ValueError):
+        print("Connexion Meterless impossible ; vérifiez la configuration et le service.")
         return 1
 
     statut = connexion["statut"]
