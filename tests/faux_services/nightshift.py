@@ -33,8 +33,11 @@ def _contenu_deterministe(prompt: str) -> str:
 
 
 class FauxNightshift(ServeurLocal):
-    def __init__(self, jeton="jeton-" + "faux-nightshift-local", modeles_repondus=None, delai_lent_s=2.0):
+    def __init__(self, jeton="jeton-" + "faux-nightshift-local", modeles_repondus=None, delai_lent_s=2.0,
+                 jetons_interdits=(JETON_DEMO_REFUSE,)):
         self.jeton = jeton
+        # Jetons reconnus mais refusés (403), dont le jeton de démonstration rt-local.
+        self.jetons_interdits = set(jetons_interdits)
         self.modeles_repondus = dict(MODELES_NEMOTRON if modeles_repondus is None else modeles_repondus)
         self.scenarios: list[str] = []
         self.delai_lent_s = delai_lent_s
@@ -49,7 +52,7 @@ class FauxNightshift(ServeurLocal):
         if not autorisation.startswith("Bearer "):
             return 401, {"error": {"message": "Authorization Bearer requis"}}
         jeton = autorisation[len("Bearer "):]
-        if jeton == JETON_DEMO_REFUSE:
+        if jeton in self.jetons_interdits:
             return 403, {"error": {"message": "jeton de demonstration refuse"}}
         if jeton != self.jeton:
             return 401, {"error": {"message": "jeton inconnu"}}

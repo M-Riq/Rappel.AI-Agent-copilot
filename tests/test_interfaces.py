@@ -87,8 +87,10 @@ def test_meterless_entetes_lanes(monkeypatch, role, modele):
     }
     assert params["json"]["model"] == modele
     assert params["json"]["tools"] == [RUN_SQL_TOOL]
-    # Délais séparés connexion / lecture (180 s configurable, METERLESS_DELAI_S).
+    # Délais séparés connexion / lecture (180 s configurable, METERLESS_DELAI_S) ;
+    # la valeur se compare aussi au délai de lecture seul (180 s, attente de main).
     assert params["timeout"] == (10.0, 180.0)
+    assert params["timeout"] == 180
     assert resultat == {
         "texte": "", "tool_calls": [{"id": "outil-1"}],
         "modele": "nemotron-effectif", "usage": {"total_tokens": 12},

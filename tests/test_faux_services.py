@@ -131,7 +131,12 @@ def test_meterless_coupe_circuit(nightshift):
 
 def test_meterless_401_403_hors_ligne_delai_distincts(nightshift):
     erreurs = {}
-    for nom, jeton in (("non_autorise", "jeton-" + "inconnu-local"), ("interdit", "rt-local")):
+    # rt-local est désormais refusé localement (règle de main, sans requête) : le 403 serveur est
+    # couvert par un autre jeton reconnu mais interdit.
+    nightshift.jetons_interdits.add("jeton-" + "interdit-local")
+    with pytest.raises(ValueError, match="METERLESS_RUNTIME_TOKEN"):
+        MeterlessLLM(replace(configuration_meterless(nightshift), meterless_runtime_token="rt-local")).completer("p", "hypotheses")
+    for nom, jeton in (("non_autorise", "jeton-" + "inconnu-local"), ("interdit", "jeton-" + "interdit-local")):
         configuration = replace(configuration_meterless(nightshift), meterless_runtime_token=jeton)
         with pytest.raises(ErreurService) as erreur:
             MeterlessLLM(configuration).completer("p", "hypotheses")

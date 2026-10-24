@@ -22,6 +22,7 @@ Langfuse**. Tout ce qui précède a été vérifié contre des **faux services l
 | 0 | Naomy | État de la machine | `powershell -ExecutionPolicy Bypass -File scripts\preparer_machine_demo.ps1` | aucun ECHOUE |
 | 2 | Yvan | Démarrer Nightshift, récupérer le fichier proxy-token | console Meterless | jeton Runtime disponible (pas `rt-local`) |
 | 4 | Naomy | Détecter Nightshift | `python scripts\detecter_nightshift.py --fichier-jeton <chemin du proxy-token>` | « en ligne » et voies proposées |
+| 5 | Naomy | Connexion et voies sans appel facturé | `python scripts\check_meterless.py --sans-chat` | code 0 (2 = non autorisé, 3 = injoignable, 1 = autre) |
 | 6 | Yvan | Clé NVIDIA active côté Nightshift, Nemotron imposé sur chaque voie | console Nightshift | étape humaine (non vérifiable par Rappel) |
 | 8 | Juan | Zetaris démarré, `SELECT 1 AS one` dans le SQL Editor | `./verify.sh` | OK |
 | 10 | Naomy | Découvrir Zetaris (endpoint, clé du SQL, tables, dialecte) | `python scripts\decouvrir_zetaris.py` | SELECT 1 REUSSI, aucune table manquante |

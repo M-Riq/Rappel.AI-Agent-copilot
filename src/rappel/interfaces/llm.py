@@ -1,18 +1,32 @@
 """Fournisseurs LLM : simulation locale ou Runtime Meterless Nightshift."""
 
-import requests
+# requests : module partagé avec client_http (les tests remplacent requests.get / requests.post).
+import requests  # noqa: F401
 
 from rappel.config import Configuration, charger
 from rappel.interfaces import _faux_sql
-from rappel.securite import url_service
+from rappel.interfaces.client_http import ErreurService
+from rappel.securite import masquer_secrets, url_service
 
 # Suffixes d'endpoint parfois collés par erreur à METERLESS_BASE_URL.
 SUFFIXES_METERLESS = ("/chat/completions", "/models", "/healthz")
 
 
+JETON_DEMO_REFUSE = "rt-local"
+
+
+def normaliser_url_base(url) -> str:
+    """Racine OpenAI-compatible validée : http(s), hôte, aucun identifiant, « /v1 » une seule fois.
+
+    Définition unique (la plus stricte) : url_meterless et les diagnostics passent par elle.
+    """
+    if not isinstance(url, str):
+        raise ValueError("METERLESS_BASE_URL doit contenir une URL.")
+    return url_service(url, "METERLESS_BASE_URL", SUFFIXES_METERLESS, "/v1")
+
+
 def url_meterless(configuration: Configuration) -> str:
-    """Racine OpenAI-compatible validée : http(s), hôte, aucun identifiant, « /v1 » une seule fois."""
-    return url_service(configuration.meterless_base_url, "METERLESS_BASE_URL", SUFFIXES_METERLESS, "/v1")
+    return normaliser_url_base(configuration.meterless_base_url)
 
 # Rôles de la boucle d'enquête SQL ; les autres rôles gardent leur comportement.
 ROLES_ENQUETE_RAPIDES = ("hypotheses", "verdict")
@@ -51,6 +65,27 @@ class FakeLLM:
         }
 
 
+class MeterlessNonAutorise(ErreurService):
+    """Le Runtime refuse le jeton Meterless (401 ou 403) : jamais confondu avec « hors ligne »."""
+
+
+class MeterlessInjoignable(ErreurService):
+    """Le Runtime Meterless ne peut pas être joint (hors ligne ou délai dépassé)."""
+
+
+CATEGORIES_NON_AUTORISE = ("non_autorise", "interdit")
+CATEGORIES_INJOIGNABLE = ("hors_ligne", "delai")
+
+
+def _traduire(erreur: ErreurService) -> ErreurService:
+    """Erreur du client réseau traduite en exceptions de diagnostic (même message, sans secret)."""
+    classe = (MeterlessNonAutorise if erreur.categorie in CATEGORIES_NON_AUTORISE else
+              MeterlessInjoignable if erreur.categorie in CATEGORIES_INJOIGNABLE else None)
+    if classe is None:
+        return erreur
+    return classe(erreur.service, erreur.categorie, erreur.conseil, erreur.statut, erreur.detail)
+
+
 CONSEILS_METERLESS = {
     "non_autorise": "jeton Runtime Nightshift incorrect (ne pas utiliser la clé NVIDIA) : vérifier "
                     "METERLESS_RUNTIME_TOKEN ; le jeton de démonstration rt-local est refusé",
@@ -67,6 +102,9 @@ CONSEILS_METERLESS = {
     "coupe_circuit": "trop d'échecs consécutifs : attendre une minute puis lancer scripts/check_meterless.py",
     "trop_volumineux": "réponse anormalement volumineuse refusée",
 }
+
+
+DELAI_DECOUVERTE_S = 10.0
 
 
 def politique_reseau(configuration: Configuration, delai_lecture_s: float):
@@ -98,6 +136,8 @@ class MeterlessLLM:
         from rappel.interfaces.client_http import ClientService
 
         self.configuration = configuration or charger()
+        self.dernier_modele_repondu = None
+        self._decouverte = None
         self.client = client or ClientService(
             "Meterless Nightshift", politique_reseau(self.configuration, self.configuration.meterless_delai_s),
             CONSEILS_METERLESS, secrets=(self.configuration.meterless_runtime_token,),
@@ -106,14 +146,61 @@ class MeterlessLLM:
     def __repr__(self):
         return f"MeterlessLLM(base={self.configuration.meterless_base_url!r})"
 
+    def jeton_utilisable(self) -> bool:
+        jeton = self.configuration.meterless_runtime_token
+        return bool(jeton and jeton.strip()) and jeton.strip() != JETON_DEMO_REFUSE
+
     def entetes(self):
-        if not self.configuration.meterless_runtime_token:
+        # Le jeton de démonstration rt-local est refusé localement : aucune requête ne part avec lui.
+        if not self.jeton_utilisable():
             raise ValueError("METERLESS_RUNTIME_TOKEN est requis pour Nightshift.")
         return {
             "Authorization": "Bearer " + self.configuration.meterless_runtime_token,
             "meterless-app": "rappel",
             "meterless-scope": "user",
         }
+
+    def _client_decouverte(self):
+        """Client des diagnostics : même politique (relances, coupe-circuit, pas de redirection), lecture 10 s."""
+        from rappel.interfaces.client_http import ClientService
+
+        if self._decouverte is None:
+            self._decouverte = ClientService(
+                "Meterless Nightshift", politique_reseau(self.configuration, DELAI_DECOUVERTE_S), CONSEILS_METERLESS,
+                secrets=(self.configuration.meterless_runtime_token,),
+            )
+        return self._decouverte
+
+    def lister_modeles(self):
+        """Identifiants de GET /v1/models (tous conservés, dans l'ordre du service)."""
+        entetes = self.entetes()
+        try:
+            reponse = self._client_decouverte().requete("get", f"{url_meterless(self.configuration)}/models",
+                                                        headers=entetes)
+        except ErreurService as erreur:
+            raise _traduire(erreur) from None
+        try:
+            modeles = reponse.json()["data"]
+            if not isinstance(modeles, list):
+                raise TypeError
+        except (ValueError, KeyError, TypeError):
+            raise RuntimeError("Réponse Meterless Nightshift invalide.") from None
+        return [modele["id"] for modele in modeles if isinstance(modele, dict) and isinstance(modele.get("id"), str)]
+
+    def tester_connexion(self):
+        """Statut ok / non_autorise / injoignable / erreur et modèles découverts ; aucun appel facturé."""
+        if not self.jeton_utilisable():
+            return {"statut": "non_autorise", "modeles": [],
+                    "message": "Jeton Runtime Nightshift manquant ou placeholder."}
+        try:
+            modeles = self.lister_modeles()
+        except MeterlessNonAutorise as erreur:
+            return {"statut": "non_autorise", "modeles": [], "message": str(erreur)}
+        except MeterlessInjoignable as erreur:
+            return {"statut": "injoignable", "modeles": [], "message": str(erreur)}
+        except (ValueError, RuntimeError) as erreur:
+            return {"statut": "erreur", "modeles": [], "message": masquer_secrets(str(erreur))}
+        return {"statut": "ok", "modeles": modeles, "message": "Connexion Runtime Meterless opérationnelle."}
 
     def modele_pour_role(self, role):
         configuration = self.configuration
@@ -134,7 +221,10 @@ class MeterlessLLM:
         entetes = self.entetes()
         racine = url_meterless(self.configuration)
         # Pas de redirection, relances limitées et coupe-circuit : voir client_http.
-        reponse = self.client.requete("post", f"{racine}/chat/completions", headers=entetes, json=corps)
+        try:
+            reponse = self.client.requete("post", f"{racine}/chat/completions", headers=entetes, json=corps)
+        except ErreurService as erreur:
+            raise _traduire(erreur) from None
         try:
             donnees = reponse.json()
             message = donnees["choices"][0]["message"]

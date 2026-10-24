@@ -43,7 +43,7 @@ class ErreurService(RuntimeError):
 
     def __init__(self, service: str, categorie: str, conseil: str = "", statut: int | None = None,
                  detail: str | None = None) -> None:
-        self.service, self.categorie, self.statut = service, categorie, statut
+        self.service, self.categorie, self.statut, self.conseil = service, categorie, statut, conseil
         self.detail = None if detail is None else masquer_secrets(detail)[:LONGUEUR_DETAIL]
         message = f"{service} : {LIBELLES.get(categorie, categorie)}"
         if self.detail:
@@ -51,6 +51,35 @@ class ErreurService(RuntimeError):
         if conseil:
             message += f" — {conseil}"
         super().__init__(masquer_secrets(message))
+
+
+class DelaisHttp(tuple):
+    """(connexion, lecture) pour requests ; comparé à un nombre, vaut le délai de lecture.
+
+    Garde la séparation connexion / lecture tout en restant égal au délai unique attendu par les
+    diagnostics de main (ex. 180 s).
+    """
+
+    def __new__(cls, connexion: float, lecture: float):
+        return super().__new__(cls, (connexion, lecture))
+
+    @property
+    def connexion(self) -> float:
+        return self[0]
+
+    @property
+    def lecture(self) -> float:
+        return self[1]
+
+    def __eq__(self, autre):
+        if isinstance(autre, (int, float)) and not isinstance(autre, bool):
+            return self.lecture == autre
+        return tuple.__eq__(self, autre)
+
+    def __ne__(self, autre):
+        return not self == autre
+
+    __hash__ = tuple.__hash__
 
 
 @dataclass(frozen=True)
@@ -125,7 +154,8 @@ class ClientService:
                 self._dormir(min(ATTENTE_MAX_S, self.politique.attente_base_s * 2 ** (tentative - 1)))
             self.nb_tentatives += 1
             try:
-                options = {"headers": headers, "timeout": (self.politique.delai_connexion_s, self.politique.delai_lecture_s),
+                options = {"headers": headers,
+                           "timeout": DelaisHttp(self.politique.delai_connexion_s, self.politique.delai_lecture_s),
                            "allow_redirects": False}
                 if json is not None:
                     options["json"] = json
