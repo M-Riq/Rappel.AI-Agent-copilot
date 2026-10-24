@@ -1,0 +1,11 @@
+{
+  "description": "Restaurer le schema attendu de orders_etl: order_id:integer, amount:decimal",
+  "patch": "{\n  \"composant\": \"orders_etl\",\n  \"avant\": [\n    \"order_id:integer\",\n    \"total:decimal\"\n  ],\n  \"apres\": [\n    \"order_id:integer\",\n    \"amount:decimal\"\n  ]\n}",
+  "niveau_risque": "auto",
+  "elements_touches": [
+    "orders_etl"
+  ],
+  "reversible": true,
+  "justification": "colonne renommée (amount -> total): schema: colonne manquante amount:decimal; schema: nouvelle colonne total:decimal (requetes q1, q5)",
+  "confiance": 1.0
+}

@@ -3,10 +3,37 @@
 import requests
 
 from rappel.config import Configuration, charger
+from rappel.interfaces import _faux_sql
+
+# Rôles de la boucle d'enquête SQL ; les autres rôles gardent leur comportement.
+ROLES_ENQUETE_RAPIDES = ("hypotheses", "verdict")
+ROLES_ENQUETE_PROFONDS = ("conclusion", "correctif")
 
 
 class FakeLLM:
+    def modele_pour_role(self, role):
+        if role in ROLES_ENQUETE_RAPIDES:
+            return "faux-rapide"
+        if role in ROLES_ENQUETE_PROFONDS:
+            return "faux-profond"
+        return "fake-deterministe"
+
     def completer(self, prompt, role, tools=None):
+        if role in ROLES_ENQUETE_RAPIDES + ROLES_ENQUETE_PROFONDS:
+            from rappel.enquete.protocoles import lire_donnees
+
+            try:
+                donnees = lire_donnees(prompt)
+            except ValueError:
+                donnees = None
+            # Sans bloc DONNEES du moteur, la simulation historique s'applique.
+            if donnees is not None:
+                return {
+                    "texte": _faux_sql.repondre(role, donnees),
+                    "tool_calls": [],
+                    "modele": self.modele_pour_role(role),
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
         return {
             "texte": f"[Simulation {role}] Vérifier les preuves avant de conclure.",
             "tool_calls": [],
@@ -28,15 +55,20 @@ class MeterlessLLM:
             "meterless-scope": "user",
         }
 
-    def completer(self, prompt, role, tools=None):
+    def modele_pour_role(self, role):
         configuration = self.configuration
-        if role in ("detective", "outil"):
+        if role in ("detective", "outil") + ROLES_ENQUETE_RAPIDES:
             lane = configuration.meterless_model_rapide
-        elif role in ("sceptique", "conclusion", "correctif"):
+        elif role in ("sceptique",) + ROLES_ENQUETE_PROFONDS:
             lane = configuration.meterless_model_profond
         else:
             lane = ""
-        modele = lane or configuration.meterless_model
+        return lane or configuration.meterless_model
+
+    def completer(self, prompt, role, tools=None):
+        configuration = self.configuration
+        modele = self.modele_pour_role(role)
+        self.dernier_modele_repondu = None
         corps = {"model": modele, "messages": [{"role": "user", "content": prompt}]}
         if tools is not None:
             corps["tools"] = tools
@@ -55,6 +87,8 @@ class MeterlessLLM:
             reponse.raise_for_status()
             donnees = reponse.json()
             message = donnees["choices"][0]["message"]
+            # Valeur réellement renvoyée par le service, sans repli sur le modèle demandé.
+            self.dernier_modele_repondu = donnees.get("model")
             return {
                 "texte": message.get("content") or "",
                 "tool_calls": message.get("tool_calls") or [],

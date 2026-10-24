@@ -1,0 +1,41 @@
+{
+  "composant": "orders_etl",
+  "table_entree": "orders",
+  "table_sortie": "orders_propres",
+  "nb_lignes": 214,
+  "schema_attendu": {
+    "order_id": "integer",
+    "amount": "decimal",
+    "quantity": "integer",
+    "customer": "text"
+  },
+  "commits_base": [
+    {"hash": "9f8e7d", "message": "orders_etl: add customer column to export", "jours": 9},
+    {"hash": "c3d4e5", "message": "tests: refresh order identifier samples", "jours": 5},
+    {"hash": "e7f8a9", "message": "docs: update pipeline owner contact", "jours": 2}
+  ],
+  "environnement_base": {"latence_ms": 120, "disque_libre_pct": 62},
+  "seuils": {"latence_max_ms": 5000, "disque_min_pct": 10},
+  "scenarios": {
+    "p1": {
+      "description": "Colonne amount renommee en total par un commit",
+      "type": "renommage",
+      "colonne": "amount",
+      "nouveau_nom": "total",
+      "commit": {"hash": "a1b2c3", "message": "rename amount->total"}
+    },
+    "p2": {
+      "description": "Meme famille : la colonne quantity passe en texte",
+      "type": "changement_type",
+      "colonne": "quantity",
+      "format_texte": "{valeur} unites",
+      "commit": {"hash": "d4e5f6", "message": "change quantity type to text"}
+    },
+    "p3": {
+      "description": "Cause externe ambigue : source lente et disque presque plein, sans commit ni ecart de schema",
+      "type": "externe",
+      "environnement": {"latence_ms": 30000, "disque_libre_pct": 4},
+      "nb_timeouts": 12
+    }
+  }
+}
