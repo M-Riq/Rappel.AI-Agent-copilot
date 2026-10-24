@@ -288,8 +288,67 @@ def creer_app(
                     break
             return resumes
 
+    def comparer_war_room(identifiant: str, confirmer: bool):
+        """Même incident rejoué sans puis avec war room, chacun sur une mémoire vide temporaire."""
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from rappel.enquete import enqueter
+        from rappel.enquete.adaptateurs import MemoireEnquete, creer_llm_enquete
+        from rappel.interfaces.abstention import AbstentionSeuil
+
+        configuration = charger()
+        with verrou:
+            contexte = incidents.get(identifiant)
+        if contexte is None:
+            raise HTTPException(404, f"Incident inconnu : {identifiant}.")
+        if configuration.llm_provider != "fake" and not confirmer:
+            raise HTTPException(409, "Rejeu avec un LLM réel : ajouter confirmer=true (deux enquêtes, appels facturés).")
+
+        def mesurer(war_room_active):
+            with TemporaryDirectory() as dossier:
+                resultat = enqueter(
+                    contexte, MemoireEnquete.json(Path(dossier) / "memoire.json"), llm or creer_llm_enquete(),
+                    abstention or AbstentionSeuil(), mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
+                    war_room_active=war_room_active,
+                )
+            metriques = resultat.metriques
+            retenue = next((h for h in resultat.hypotheses if h.statut == "retenue"), None)
+            return {
+                "war_room_active": war_room_active, "nb_appels_llm": metriques.nb_appels_llm,
+                "nb_evenements": metriques.nb_evenements, "nb_tours_war_room": metriques.nb_tours_war_room,
+                "nb_appels_llm_war_room": metriques.nb_appels_llm_war_room, "nb_objections": metriques.nb_objections,
+                "nb_objections_sans_reponse": metriques.nb_objections_sans_reponse,
+                "confiance_hypothese": None if retenue is None else retenue.confiance,
+                "confiance_decision": resultat.decision_abstention.confiance,
+                "abstention": resultat.decision_abstention.abstient,
+                "preuves_citees": [] if retenue is None else list(retenue.preuves),
+            }
+
+        try:
+            with verrou_execution:
+                sans, avec = mesurer(False), mesurer(True)
+        except Exception:
+            raise HTTPException(500, "Rejeu impossible ; aucun détail sensible exposé.") from None
+        simulation = configuration.llm_provider == "fake"
+        return {
+            "mode": "war_room", "incident": identifiant, "sans": sans, "avec": avec,
+            "confiance_avant": sans["confiance_hypothese"], "confiance_apres": avec["confiance_hypothese"],
+            "difference": {"appels_llm": avec["nb_appels_llm"] - sans["nb_appels_llm"],
+                           "evenements": avec["nb_evenements"] - sans["nb_evenements"]},
+            "preuves_inchangees": sans["preuves_citees"] == avec["preuves_citees"],
+            "simulation": simulation,
+            "note": ("simulé : LLM fake, le débat est scripté et ne mesure pas un vrai modèle" if simulation
+                     else "rejeu réel : deux enquêtes sur une mémoire vide temporaire"),
+        }
+
     @application.get("/comparaison")
-    def comparer(a: str, b: str):
+    def comparer(a: str, b: str | None = None, mode: Literal["incidents", "war_room"] = "incidents",
+                 confirmer: bool = False):
+        if mode == "war_room":
+            return comparer_war_room(a, confirmer)
+        if b is None:
+            raise HTTPException(422, "Paramètre b requis pour comparer deux incidents.")
         with verrou:
             resultats = {}
             for identifiant in (a, b):

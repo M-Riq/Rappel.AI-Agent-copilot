@@ -47,7 +47,15 @@ LIBELLES = {
     "A14": "en mode réel, le modèle renvoyé contient « nemotron »",
     "A15": "P1 rejouée 5 fois : même conclusion au moins 4 fois",
 }
+LIBELLES.update({
+    "W1": "war room : débat borné par le plafond de tours et d'appels",
+    "W2": "war room : le débat ne change jamais une preuve citée",
+    "W3": "war room : arrêt clair (motif affiché)",
+})
 PLAFOND_ESSAI = 2
+PLAFOND_WAR_ROOM = 1
+MOTIFS_ARRET_WAR_ROOM = ("plafond de tours atteint", "aucune objection restante", "plafond d'appels", "JSON invalide",
+                         "fournisseur LLM indisponible")
 SEUIL_STABILITE = 4
 
 
@@ -100,6 +108,33 @@ def case_a13(configuration):
                 "deux configurations METERLESS_MODEL_RAPIDE/PROFOND, aiguillage vérifié sans appel réseau")
 
 
+def preuves_sql(resultat):
+    return [evenement.requete_sql for evenement in resultat.evenements if evenement.type == "preuve" and evenement.requete_sql]
+
+
+def cases_war_room(sans, borne, plafond_appels, llm_reel):
+    """W1-W3 : même P1 sans débat et avec débat borné à PLAFOND_WAR_ROOM tour(s)."""
+    metriques = borne.metriques
+    w1 = 1 <= metriques.nb_tours_war_room <= PLAFOND_WAR_ROOM and metriques.nb_appels_llm_war_room <= plafond_appels
+    retenue_sans, retenue_avec = retenue(sans), retenue(borne)
+    w2 = (retenue_sans is not None and retenue_avec is not None and retenue_sans.preuves == retenue_avec.preuves
+          and preuves_sql(sans) == preuves_sql(borne))
+    fins = [evenement for evenement in borne.evenements if evenement.texte.startswith("War room terminee : ")]
+    dernier_debat = max((evenement.etape for evenement in borne.evenements if evenement.type == "debat"), default=0)
+    motif = fins[-1].texte.split(" : ", 1)[1].split(";", 1)[0] if fins else ""
+    w3 = bool(fins) and fins[-1].etape > dernier_debat and any(motif.startswith(m) for m in MOTIFS_ARRET_WAR_ROOM)
+    options = {"simule": not llm_reel, "raison_reel": None if llm_reel else "service réel requis : Nightshift"}
+    return [
+        case("W1", verdict(w1), f"{metriques.nb_tours_war_room} tour(s) pour un plafond de {PLAFOND_WAR_ROOM} ; "
+             f"{metriques.nb_appels_llm_war_room} appel(s) pour un plafond de {plafond_appels}",
+             reel=verdict(w1) if llm_reel else NON_MESURE, **options),
+        case("W2", verdict(w2), "preuves de l'hypothèse retenue et requêtes SQL identiques avec et sans débat"
+             if w2 else "une preuve citée diffère après le débat", reel=verdict(w2) if llm_reel else NON_MESURE, **options),
+        case("W3", verdict(w3), f"arrêt : « {motif} »" if fins else "aucun message d'arrêt de la war room",
+             reel=verdict(w3) if llm_reel else NON_MESURE, **options),
+    ]
+
+
 def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repetitions=5, memoire_reelle=None):
     configuration = configuration or charger()
     llm_reel = configuration.llm_provider != "fake"
@@ -129,6 +164,13 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
             ))
             contraire = lancer("p1", memoire_contraire)
         stabilite = mesurer_stabilite(charger_contexte("p1"), fabrique(), repetitions)
+        from rappel.enquete.war_room import configuration as configuration_war_room
+
+        plafond_appels = configuration_war_room(active=True).max_appels_llm
+        sans_debat = lancer("p1", MemoireEnquete.json(dossier / "sans_debat.json"), war_room_active=False)
+        avec_debat = lancer("p1", MemoireEnquete.json(dossier / "avec_debat.json"), war_room_active=True,
+                            war_room_max_tours=PLAFOND_WAR_ROOM, war_room_max_appels_llm=plafond_appels)
+        war_room = cases_war_room(sans_debat, avec_debat, plafond_appels, llm_reel)
 
     # A1-A2 : hypotheses et preuves citees.
     cases.append(case("A1", verdict(len(p1.hypotheses) >= 2 and all(
@@ -260,7 +302,8 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
                   "memoire": configuration.memoire_provider, "max_tours_enquete": configuration.max_tours_enquete,
                   "simulation": not llm_reel or not source_reelle},
         "cases": cases,
-        "echecs": [element["case"] for element in cases if ECHOUE in (element["statut"], element["reel"])],
+        "cases_war_room": war_room,
+        "echecs": [element["case"] for element in cases + war_room if ECHOUE in (element["statut"], element["reel"])],
         "non_mesures": [element["case"] for element in cases if element["statut"] == NON_MESURE],
         "parties_reelles_non_mesurees": [element["case"] for element in cases if element["reel"] == NON_MESURE],
     }
@@ -272,6 +315,11 @@ def afficher_rapport(rapport):
              f"max_tours={modes['max_tours_enquete']}" + (" (SIMULATION)" if modes["simulation"] else ""))
     afficher("Case | Statut | Partie reelle | Libelle | Detail")
     for element in rapport["cases"]:
+        statut = element["statut"] + (" (simule)" if element["simule"] else "")
+        reel = "-" if element["reel"] is None else element["reel"] + (
+            f" : {element['raison_reel']}" if element["raison_reel"] else "")
+        afficher(f"{element['case']} | {statut} | {reel} | {element['libelle']} | {element['detail']}")
+    for element in rapport.get("cases_war_room", []):
         statut = element["statut"] + (" (simule)" if element["simule"] else "")
         reel = "-" if element["reel"] is None else element["reel"] + (
             f" : {element['raison_reel']}" if element["raison_reel"] else "")

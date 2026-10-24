@@ -23,6 +23,31 @@ def style_evenement(evenement: dict) -> tuple[str, str]:
     return STYLES_EVENEMENT.get(type_evenement, ("info", type_evenement.capitalize() or "Information"))
 
 
+# Rôles de la war room (src/rappel/enquete/war_room.py) : le code arbitre, jamais le modèle.
+ROLES_DEBAT = {
+    "detective": "détective",
+    "sceptique": "avocat du diable (sceptique)",
+    "historien": "historien (mémoire)",
+    "systeme": "arbitre (code)",
+}
+DEBUTS_ARBITRAGE = ("Objection du tour ", "War room terminee", "JSON invalide du ")
+
+
+def role_debat(evenement: dict) -> str | None:
+    """Rôle si l'événement appartient au débat de la war room, sinon None."""
+    acteur = str(evenement.get("acteur", ""))
+    if str(evenement.get("type", "")) == "debat":
+        return ROLES_DEBAT.get(acteur, acteur or "inconnu")
+    if acteur == "systeme" and str(evenement.get("texte", "")).startswith(DEBUTS_ARBITRAGE):
+        return ROLES_DEBAT["systeme"]
+    return None
+
+
+def etiquette_debat(evenement: dict) -> str | None:
+    role = role_debat(evenement)
+    return None if role is None else f"Débat · {role}"
+
+
 def badge_modele(evenement: dict, simulation: bool) -> str | None:
     """Badge honnête : jamais « Nemotron » pour un modèle simulé ou un autre modèle."""
     modele = str(evenement.get("modele") or "").strip()

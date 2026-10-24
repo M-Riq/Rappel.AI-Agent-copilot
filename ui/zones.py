@@ -27,6 +27,9 @@ def _etat():
 def afficher_evenement(evenement: dict, simulation: bool) -> None:
     gravite, libelle = logique.style_evenement(evenement)
     st.caption(f"Étape {evenement.get('etape', '?')} · {libelle} · {evenement.get('acteur', '')}")
+    etiquette = logique.etiquette_debat(evenement)
+    if etiquette:
+        st.caption(etiquette)
     getattr(st, AFFICHEURS[gravite])(logique.texte_evenement(evenement))
     badge = logique.badge_modele(evenement, simulation)
     if badge:

@@ -88,11 +88,13 @@ JSON par evenement ; la fonction n'impose ni dossier ni extension.
 Sources : [boucle_sql.py](../src/rappel/enquete/boucle_sql.py),
 [run_sql.py](../src/rappel/interfaces/run_sql.py) (contrat backend : [run_sql.md](run_sql.md)).
 Principe : **le LLM propose, le code verifie**. Un tour = un appel LLM, plafond
-`MAX_TOURS = 6` (`max_tours`). La war room (hors MVP) n'existe qu'en mode `outils`.
+`MAX_TOURS = 6` (`max_tours`). La war room (optionnelle, `WAR_ROOM_ACTIVE=1`) s'insere entre `juger`
+et `evaluer_confiance` ; en mode SQL, sa verification des citations est un evenement `decision`
+(une `preuve` cite toujours une requete executee) et une preuve citee modifiee leve une erreur.
 
 ```text
 START -> charger_contexte -> consulter_memoire -> proposer_hypotheses -> juger
-      -> evaluer_confiance
+      -> war_room (si WAR_ROOM_ACTIVE=1 et une hypothese retenue) -> evaluer_confiance
            | abstient -> abstention -> END
            | sinon    -> conclure -> (correctif ? ecrire_memoire : abstention) -> END
 ```
@@ -450,6 +452,13 @@ c_initiale = min(0.95, 0.3 * nombre_de_preuves)
 variables d'environnement.
 
 ### War room et abstention
+
+Variables (voir `.env.example`, aucune valeur secrete) : `WAR_ROOM_ACTIVE` (0 par defaut),
+`WAR_ROOM_MAX_TOURS` (2), `WAR_ROOM_MAX_APPELS_LLM` (6). Roles affiches dans l'interface
+(etiquette « Debat · role ») : detective, avocat du diable (sceptique), historien (memoire),
+arbitre (code : verification des citations et bilan « War room terminee : motif »).
+Mesure : `GET /comparaison?a=<id>&mode=war_room` rejoue l'incident sans puis avec debat
+(memoire vide temporaire) ; recette : cases W1-W3 de `scripts/recette_module_a.py`.
 
 Le debat ne change ni les preuves ni le choix de la gagnante. L'historien resume
 la memoire sans LLM ; le sceptique emet une objection et le detective cite des
