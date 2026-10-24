@@ -45,11 +45,26 @@ Avec `--confirmer` : Zetaris `SELECT 1 AS one`, requête sur deux sources
 tables, aller-retour annulé). Résultat dans `data/verification_machine.json`. Aucune clé ni mot
 de passe n'est affiché (valeurs masquées).
 
-## 5. Recettes en réel
+## 5. Recette réelle en une commande
+
+```powershell
+python scripts\recette_reelle.py --confirmer
+```
+
+Ordre fixe : **Nightshift** (`check_meterless`), puis **Zetaris** (`check_zetaris`), puis
+**Postgres** (`check_postgres`), puis A14 (modèle renvoyé contenant « nemotron » sur la voie
+rapide ET la voie profonde), A15 (P1 rejouée 5 fois, même conclusion au moins 4 fois), la boucle
+P1 -> P2 -> P3 complète (`scripts/boucle_agents.py`), la war room réelle (plafond de tours et
+d'appels affiché avant lancement, arrêt au plafond) et la collecte des preuves sponsors.
+`--confirmer` est obligatoire. Une étape dont le service n'a pas de clé (ou n'a pas été vérifié)
+est NON_MESURE avec la raison, jamais ECHOUE. Rapport : `data/recette_reelle.json`, sans clé.
+
+Détail, étape par étape, si besoin :
 
 ```powershell
 python scripts\recette_module_a.py --confirmer
 python scripts\recette_globale.py --confirmer
+python scripts\boucle_agents.py --scenario p1,p2,p3 --confirmer
 python scripts\collecter_preuves_sponsors.py --confirmer
 ```
 
