@@ -42,6 +42,8 @@ class Configuration:
     rayon_max_elements: int = 3
     rayon_elements_critiques: str = "production,paiement,facturation,securite"
     api_url: str = "http://127.0.0.1:8000"
+    # Journal de la boucle des 4 agents (JSON Lines, sans secret ; ce n'est pas un evenement du contrat).
+    boucle_journal_path: str = "data/boucle_journal.jsonl"
 
     def __post_init__(self):
         for valeur, choix in (

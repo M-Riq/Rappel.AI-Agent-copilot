@@ -445,6 +445,13 @@ def creer_app(
             ajouter_decision(identifiant, etat, f"Résultat Action : {corps.resultat} ; mémoire mise à jour={mise_a_jour}")
         return {"incident_id": identifiant, "resultat": corps.resultat, "memoire_mise_a_jour": mise_a_jour}
 
+    @application.get("/boucle/etat")
+    def lire_etat_boucle():
+        """Dernier cycle de la boucle des 4 agents (journal, lecture seule, sans secret)."""
+        from rappel.orchestration.boucle import lire_dernier_cycle
+
+        return lire_dernier_cycle()
+
     @application.get("/memoire")
     def lire_memoire(signature: str | None = None):
         try:

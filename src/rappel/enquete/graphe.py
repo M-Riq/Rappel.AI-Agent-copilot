@@ -429,6 +429,7 @@ def enqueter(
             graphe_sql, ressources = boucle_sql.creer_graphe_sql(
                 memoire, llm, abstention, sur_evenement=transmettre, run_sql=run_sql,
                 fabrique_run_sql=fabrique_run_sql, max_tours=max_tours, appel_outils=appel_outils,
+                configuration_war_room=config_debat,
             )
             etat = graphe_sql.invoke(boucle_sql.etat_initial_sql(contexte, resultat))
             fermer_backend = getattr(ressources["run_sql"], "fermer", None)
