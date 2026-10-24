@@ -55,7 +55,7 @@ def _maintenant() -> str:
 
 
 def modes(configuration: Configuration, memoire=None) -> dict:
-    from rappel.api import mode_memoire
+    from rappel.interfaces.memoire import mode_memoire
 
     mode_memoire_effectif = mode_memoire(memoire) if memoire is not None else configuration.memoire_provider
     return {

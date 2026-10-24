@@ -300,6 +300,18 @@ class MemoireAvecSecours:
         raise AttributeError(nom)
 
 
+def mode_memoire(memoire):
+    """json, postgres ou fallback-json selon le backend effectivement utilise."""
+    backend = getattr(memoire, "backend", memoire)
+    if getattr(backend, "mode", None):
+        return backend.mode
+    if isinstance(backend, MemoireJSON):
+        return "json"
+    if isinstance(backend, MemoirePostgres):
+        return "postgres"
+    return type(backend).__name__
+
+
 def mode_memoire_effectif():
     """Dernier mode observe pour la memoire Postgres : postgres, fallback-json ou non_verifie."""
     return _ETAT_SECOURS["mode"] or "non_verifie"

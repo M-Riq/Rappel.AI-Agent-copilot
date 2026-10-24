@@ -49,7 +49,10 @@ pytest --ignore=tests/test_ui.py           # sans Streamlit ; pytest complet ave
 uvicorn rappel.api:app --app-dir src       # API locale
 python scripts/demo_enquete.py             # P1, P2, P3 : métriques et contrôle de santé
 python scripts/verifier_pret.py            # configuration, sécurité du dépôt, démo à blanc
-python scripts/recette_module_a.py         # recette A1-A15 du Module A (data/recette.json)
+python scripts/recette_module_a.py         # recette A1-A15 (+ W1-W3 war room) du Module A (data/recette.json)
+python scripts/boucle_agents.py --scenario p1,p2,p3   # boucle des 4 agents (Ingestion, Enquête, Mémoire, Action)
+python scripts/boucle_agents.py --surveiller --max-cycles 3   # lance la boucle à chaque passage au rouge
+python scripts/recette_reelle.py --confirmer   # recette réelle en une commande (NON_MESURE sans clés)
 streamlit run ui/app.py                    # interface P1 ; page « Enquête en direct » (trois zones)
 ```
 

@@ -78,16 +78,9 @@ def _fixture(nom):
 
 def mode_memoire(memoire):
     """json, postgres ou fallback-json selon le backend effectivement utilise."""
-    from rappel.interfaces.memoire import MemoireJSON, MemoirePostgres
+    from rappel.interfaces.memoire import mode_memoire as calculer
 
-    backend = getattr(memoire, "backend", memoire)
-    if getattr(backend, "mode", None):
-        return backend.mode
-    if isinstance(backend, MemoireJSON):
-        return "json"
-    if isinstance(backend, MemoirePostgres):
-        return "postgres"
-    return type(backend).__name__
+    return calculer(memoire)
 
 
 def _json_contrat(objet):

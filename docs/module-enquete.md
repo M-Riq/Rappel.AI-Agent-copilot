@@ -512,9 +512,42 @@ un identifiant d'incident.
 - API locale sans authentification, etat des incidents en memoire du processus (un seul worker).
 - Seuils choisis sur trois fixtures et perturbations synthetiques ; la confiance est un
   score heuristique, pas une probabilite calibree.
-- La fusion conclusion + correctif repose sur un correctif `reussi` de meme signature.
+- La fusion conclusion + correctif repose sur le resultat `reussi` enregistre de meme signature,
+  meme s'il n'est pas encore confirme ; seul le libelle « resolu par » exige la confirmation.
 - War room et traceur Langfuse : hors configuration unique, desactives par defaut.
 - L'avertissement Pydantic sur le champ `schema` de `ContexteIncident` est connu.
+
+## 7 bis. Boucle des 4 agents, resultat confirme, graphe et rejeu
+
+**Boucle** ([boucle.py](../src/rappel/orchestration/boucle.py), [boucle_agents.py](../scripts/boucle_agents.py)) :
+`executer_boucle(scenario)` enchaine Ingestion (etat du pipeline de demo, contexte valide par le
+contrat) -> Memoire (lecture des souvenirs et refutations) -> Enquete (moteur SQL, war room selon
+`WAR_ROOM_ACTIVE`) -> Memoire (souvenir provisoire ecrit par le moteur) -> Action (rayon d'impact ;
+execution seulement si `ACTION_REELLE_DEMO=1` et sur le pipeline de demo isole, sinon proposition)
+-> Retour (resultat `reussi`/`echoue` de l'action ecrit en memoire). Chaque passage ecrit une ligne
+dans `data/boucle_journal.jsonl` (`BOUCLE_JOURNAL_PATH`) : agent, etape, statut, duree, mode
+simule/reel, detail court sans texte du modele ; ce journal n'est pas un evenement du contrat.
+`--surveiller` relit l'etat du pipeline toutes les `--intervalle` secondes et lance un cycle a
+chaque passage au rouge (un meme etat rouge une seule fois), avec `--max-cycles` et `--duree-max`.
+Mesure simulee (`--scenario p1,p2,p3`, memoire neuve) : P1 21 evenements / 5 appels, P2 12 / 3,
+P3 abstention (19 evenements, 3 appels), pipeline inchange.
+
+**Resultat confirme** : `enqueter(..., resultat_confirme=False)` (API et boucle) marque le souvenir
+« non confirme » dans `<memoire>.non_confirmes.json` (le contrat n'a que `reussi`/`echoue`).
+`graphe.decrire_souvenir` n'ecrit « incident similaire resolu par » que pour un resultat `reussi`
+confirme ; sinon « essaye : <correctif> (resultat non confirme) » ou « echec du correctif deja
+essaye (echoue) ». `mettre_a_jour_resultat` (retour de l'action) leve le marquage.
+
+**Graphe de relations** ([graphe_relations.py](../src/rappel/memoire/graphe_relations.py)) :
+deterministe, sans LLM, construit depuis la memoire (souvenirs, table des hypotheses) et les
+incidents connus ; sorties JSON `{noeuds, aretes}` et Mermaid ; `GET /graphe`, `GET /graphe/{id}` ;
+zone « Relations » de l'interface (`st.graphviz_chart` si disponible, sinon Mermaid + tableau).
+
+**Rejeu** : `GET /incidents/{id}/enquete/evenements?apres=N&jusqua=M` et curseur « Etape (rejeu) »
+de l'interface ; lecture seule, rien n'est recalcule.
+
+**Recette reelle** : `python scripts/recette_reelle.py --confirmer` (voir
+[INSTALLATION-DEMO.md](INSTALLATION-DEMO.md)) ; sans cles, chaque etape est NON_MESURE.
 
 ## 8. Checklist A1 a A15 (cahier MVP v4)
 
@@ -538,6 +571,9 @@ Etat mesure par `scripts/recette_module_a.py` en mode fake/fichier/json (23/10/2
 | A13 | Changer de voie ou de modele par configuration (METERLESS_MODEL_RAPIDE/PROFOND) | reussi (deux configurations) | - |
 | A14 | En mode reel, le modele renvoye contient « nemotron » | non mesure | non mesuree : Nightshift |
 | A15 | P1 rejouee 5 fois : meme conclusion au moins 4 fois | reussi (simule, 5/5) | non mesuree : Nightshift |
+| W1 | War room : debat borne par le plafond de tours et d'appels | reussi (simule, 1 tour / plafond 1, 2 appels / plafond 6) | non mesuree : Nightshift |
+| W2 | War room : le debat ne change jamais une preuve citee | reussi (simule) | non mesuree : Nightshift |
+| W3 | War room : arret clair (motif affiche) | reussi (simule, « plafond de tours atteint ») | non mesuree : Nightshift |
 
 Tests : [test_recette_module_a.py](../tests/test_recette_module_a.py), [test_enquete_sql.py](../tests/test_enquete_sql.py),
 [test_calibration_sql.py](../tests/test_calibration_sql.py), [test_conformite_contrats.py](../tests/test_conformite_contrats.py),
