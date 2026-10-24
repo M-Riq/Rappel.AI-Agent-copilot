@@ -322,6 +322,9 @@ modele `.env.example`, aucun secret suivi) :
 | `RAYON_SEUIL_AUTO`, `RAYON_SEUIL_VALIDATION`, `RAYON_MAX_ELEMENTS`, `RAYON_ELEMENTS_CRITIQUES` | `rayon_*` | Rayon d'impact calcule par le code : auto (confiance >= 0,9), validation, refus (< 0,6, irreversible, > 3 elements) |
 | `BOUCLE_JOURNAL_PATH` | `boucle_journal_path` | Journal de la boucle des 4 agents (sans secret) |
 | `API_URL` | `api_url` | URL de l'API lue par l'interface Streamlit |
+| `METERLESS_DELAI_S`, `ZETARIS_DELAI_S`, `RESEAU_DELAI_CONNEXION_S` | idem | Delais de lecture (180 s pour Nightshift, 60 s pour Zetaris) et de connexion (10 s), separes |
+| `RESEAU_RELANCES`, `RESEAU_ATTENTE_BASE_S`, `RESEAU_SEUIL_COUPE_CIRCUIT` | idem | Relances des erreurs passageres (hors ligne, delai, 429, 5xx) avec attente croissante (1 s, 2 s...), coupe-circuit apres 3 echecs consecutifs (60 s) ; jamais de relance sur 401/403/404 ([client_http.py](../src/rappel/interfaces/client_http.py)) |
+| `ZETARIS_CHEMIN_SQL`, `ZETARIS_CLE_SQL` | idem | Endpoint REST du SQL et cle du SQL dans le corps (defaut `/sql-editor/sqls/run`, `sql`) |
 
 Variables hors configuration unique, conservees pour des briques optionnelles :
 `WAR_ROOM_*` (war room, hors MVP, desactivee par defaut) et `LANGFUSE_*` (traceur optionnel).

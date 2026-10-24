@@ -18,7 +18,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import afficher, autoriser, fermer, nettoyer
+from scripts._essai_commun import ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, autoriser, fermer, nettoyer
 from rappel.config import charger
 from rappel.enquete import enqueter
 from rappel.enquete.adaptateurs import MemoireEnquete, creer_llm_enquete
@@ -112,7 +112,10 @@ def main(argv=None, fabrique_llm=None):
     if not autoriser(arguments.confirmer, configuration.max_tours_enquete * 2):
         return 2
     try:
+        faux = annoncer_faux_services()
         rapport = collecter(configuration, arguments.confirmer, fabrique_llm)
+        if faux:
+            rapport["avertissement"] = ETIQUETTE_FAUX_SERVICES
     except Exception:
         afficher("Collecte impossible : vérifier la configuration et les services ; aucun détail sensible affiché.")
         return 1

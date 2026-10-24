@@ -1,4 +1,20 @@
+import os
+
 from rappel.config import charger
+
+ETIQUETTE_FAUX_SERVICES = "FAUX SERVICE LOCAL, NON une preuve sponsor"
+
+
+def faux_services_actifs() -> bool:
+    """Vrai quand les variables pointent vers les faux services locaux des tests (RAPPEL_FAUX_SERVICES=1)."""
+    return os.environ.get("RAPPEL_FAUX_SERVICES", "").strip() == "1"
+
+
+def annoncer_faux_services() -> bool:
+    if faux_services_actifs():
+        print(ETIQUETTE_FAUX_SERVICES + " : aucun résultat ci-dessous ne prouve l'usage d'un sponsor.")
+        return True
+    return False
 from rappel.securite import masquer_secrets
 
 

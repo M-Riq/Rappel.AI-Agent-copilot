@@ -81,8 +81,8 @@ def test_nightshift_seul_et_zetaris_en_echec(cles_nightshift, monkeypatch, tmp_p
 def test_a14_routage_hors_nemotron():
     resultat = recette.case_a14(LLMAutreModele)
     assert resultat["statut"] == "ECHOUE"
-    assert resultat["detail"].startswith("le routage a choisi rapide : meterless/auto-choisi")
-    assert resultat["detail"].endswith(": fixer la voie")
+    # Format exact du cahier : « le routage a choisi <modèle> : fixer la voie » (voie précisée ensuite).
+    assert resultat["detail"].startswith("le routage a choisi meterless/auto-choisi-rapide : fixer la voie rapide")
 
 
 def test_war_room_plafond_affiche(capsys, monkeypatch):

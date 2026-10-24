@@ -18,6 +18,8 @@ def environnement_local(monkeypatch, tmp_path):
     monkeypatch.setenv("PIPELINE_DEMO_DIR", str(tmp_path / "pipeline_demo"))
     # Journal de la boucle des 4 agents : jamais data/ du depot pendant les tests.
     monkeypatch.setenv("BOUCLE_JOURNAL_PATH", str(tmp_path / "boucle_journal.jsonl"))
+    # Relances réseau sans attente pendant les tests (la politique reste la même).
+    monkeypatch.setenv("RESEAU_ATTENTE_BASE_S", "0")
     for nom in ("ACTION_REELLE_DEMO", "WAR_ROOM_ACTIVE"):
         monkeypatch.delenv(nom, raising=False)
 

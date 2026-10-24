@@ -11,8 +11,7 @@ import requests
 from rappel.config import RACINE, charger
 from rappel.securite import url_service
 
-# TODO : confirmer le corps via http://localhost:8888/redoc/index.html.
-CLE_SQL_CORPS = "sql"
+# Clé du SQL dans le corps et endpoint : ZETARIS_CLE_SQL / ZETARIS_CHEMIN_SQL (scripts/decouvrir_zetaris.py).
 
 RUN_SQL_TOOL = {
     "type": "function",
@@ -127,39 +126,91 @@ def _lignes_fichier(sql, scenario):
             raise ValueError("Requête non prise en charge par les fixtures locales (SQL SQLite).") from None
 
 
+CONSEILS_ZETARIS = {
+    "non_autorise": "clé refusée : vérifier ZETARIS_API_KEY",
+    "interdit": "clé reconnue mais droits insuffisants : vérifier ZETARIS_ORG_ID et les droits de la clé",
+    "introuvable": "vérifier ZETARIS_BASE_URL et ZETARIS_CHEMIN_SQL (scripts/decouvrir_zetaris.py)",
+    "requete": "requête refusée : vérifier ZETARIS_CLE_SQL et le dialecte (docs/run_sql.md)",
+    "table_inconnue": "table absente côté Zetaris : exposer les tables de docs/run_sql.md (Juan)",
+    "syntaxe_sql": "dialecte refusé : utiliser du SQL standard (docs/run_sql.md, portabilité)",
+    "quota": "Zetaris limite le débit : réessayer plus tard",
+    "serveur": "Zetaris a échoué : consulter ses journaux, puis réessayer",
+    "hors_ligne": "Zetaris ne répond pas : vérifier qu'il est démarré (./verify.sh) et ZETARIS_BASE_URL",
+    "delai": "délai ZETARIS_DELAI_S dépassé : requête trop lourde ou service surchargé",
+    "redirection": "la clé n'est envoyée qu'à l'hôte configuré : corriger ZETARIS_BASE_URL",
+    "coupe_circuit": "trop d'échecs consécutifs : attendre une minute puis lancer scripts/check_zetaris.py",
+    "trop_volumineux": "résultat trop volumineux : restreindre la requête (LIMIT)",
+}
+MOTS_TABLE_INCONNUE = ("table or view not found", "table not found", "does not exist", "unknown table",
+                       "no such table", "not found")
+MOTS_SYNTAXE = ("syntax", "parse", "mismatched", "unexpected", "dialect", "not supported")
+_CLIENTS: dict = {}
+
+
+def client_zetaris(configuration):
+    """Client partagé par configuration : le coupe-circuit couvre tous les appels du processus."""
+    from rappel.interfaces.client_http import ClientService
+    from rappel.interfaces.llm import politique_reseau
+
+    politique = politique_reseau(configuration, configuration.zetaris_delai_s)
+    cle = (configuration.zetaris_base_url, configuration.zetaris_api_key, politique)
+    if cle not in _CLIENTS:
+        _CLIENTS[cle] = ClientService("Zetaris", politique, CONSEILS_ZETARIS, secrets=(configuration.zetaris_api_key,))
+    return _CLIENTS[cle]
+
+
+def extraire_lignes(donnees):
+    """Lignes Zetaris : liste, {lignes|rows|data|results: [...]}, ou {columns: [...], rows: [[...]]}."""
+    if isinstance(donnees, list):
+        return donnees
+    if not isinstance(donnees, dict):
+        return None
+    colonnes = donnees.get("columns") or donnees.get("colonnes")
+    for cle in ("lignes", "rows", "data", "results"):
+        lignes = donnees.get(cle)
+        if isinstance(lignes, list):
+            if isinstance(colonnes, list) and lignes and all(isinstance(ligne, list) for ligne in lignes):
+                noms = [colonne.get("name") if isinstance(colonne, dict) else str(colonne) for colonne in colonnes]
+                return [dict(zip(noms, ligne)) for ligne in lignes]
+            return lignes
+    return None
+
+
 def run_sql(sql, *, configuration=None, scenario="p1"):
+    from rappel.interfaces.client_http import ErreurService
+
     _verifier_instruction(sql)
     configuration = configuration or charger()
     if configuration.source_provider == "fichier":
         return {"requete": sql, "lignes": _lignes_fichier(sql, scenario)}
     if not configuration.zetaris_api_key:
         raise ValueError("ZETARIS_API_KEY est requise pour Zetaris.")
-    racine = url_service(configuration.zetaris_base_url, "ZETARIS_BASE_URL", ("/sql-editor/sqls/run",))
+    racine = url_service(configuration.zetaris_base_url, "ZETARIS_BASE_URL", (configuration.zetaris_chemin_sql,))
+    client = client_zetaris(configuration)
     try:
-        # Pas de redirection : la clé n'est envoyée qu'à l'hôte configuré.
-        reponse = requests.post(
-            f"{racine}/sql-editor/sqls/run",
+        # Une requête SELECT ne modifie rien : relancer après une erreur passagère est sans risque.
+        reponse = client.requete(
+            "post", f"{racine}{configuration.zetaris_chemin_sql}",
             headers={
                 "Authorization": "Bearer " + configuration.zetaris_api_key,
                 "X-Org-ID": configuration.zetaris_org_id,
                 "X-Request-ID": str(uuid4()),
             },
-            json={CLE_SQL_CORPS: sql},
-            timeout=30,
-            allow_redirects=False,
+            json={configuration.zetaris_cle_sql: sql},
         )
-        reponse.raise_for_status()
+    except ErreurService as erreur:
+        if erreur.categorie == "requete" and erreur.detail:
+            detail = erreur.detail.lower()
+            if any(mot in detail for mot in MOTS_TABLE_INCONNUE):
+                raise client.erreur("table_inconnue", erreur.statut, erreur.detail) from None
+            if any(mot in detail for mot in MOTS_SYNTAXE):
+                raise client.erreur("syntaxe_sql", erreur.statut, erreur.detail) from None
+        raise
+    try:
         donnees = reponse.json()
-    except requests.RequestException:
-        raise RuntimeError("Zetaris est indisponible ou a refusé la requête ; vérifier sa configuration.") from None
     except ValueError:
         raise RuntimeError("Réponse JSON Zetaris invalide.") from None
-    if isinstance(donnees, list):
-        lignes = donnees
-    elif isinstance(donnees, dict):
-        lignes = donnees.get("lignes", donnees.get("rows"))
-    else:
-        lignes = None
+    lignes = extraire_lignes(donnees)
     if not isinstance(lignes, list):
         raise RuntimeError("Format des lignes Zetaris à confirmer dans la documentation REST locale.")
     return {"requete": sql, "lignes": lignes}

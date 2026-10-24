@@ -28,7 +28,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import afficher, nettoyer
+from scripts._essai_commun import ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, nettoyer
 from rappel.config import charger
 
 REUSSI, ECHOUE, NON_MESURE = "REUSSI", "ECHOUE", "NON_MESURE"
@@ -106,9 +106,10 @@ def case_a14(fabrique_llm):
         llm.completer(PROMPT_VOIE.format(role=role), role=role)
         info = getattr(llm, "derniere_reponse_info", None) or {}
         modeles[voie] = info.get("modele_repondu") or "non communiqué"
-    autres = [f"{voie} : {modele}" for voie, modele in modeles.items() if "nemotron" not in str(modele).lower()]
+    autres = [f"le routage a choisi {modele} : fixer la voie {voie}" for voie, modele in modeles.items()
+              if "nemotron" not in str(modele).lower()]
     if autres:
-        return etape("A14", ECHOUE, "le routage a choisi " + " ; ".join(autres) + " : fixer la voie")
+        return etape("A14", ECHOUE, " ; ".join(autres))
     return etape("A14", REUSSI, f"voie rapide : {modeles['rapide']} ; voie profonde : {modeles['profonde']}")
 
 
@@ -235,7 +236,10 @@ def main(argv=None, fabrique_llm=None, verifications=None, lancer_boucle=None) -
               + configuration.max_tours_enquete + 6 + configuration.max_tours_enquete)
     afficher(f"Ordre : {' -> '.join(ORDRE)}. Appels LLM prévus au maximum : {appels} "
              f"(LLM_MAX_APPELS={configuration.llm_max_appels} par enquête).")
+    faux = annoncer_faux_services()
     rapport = executer(fabrique_llm, verifications, lancer_boucle)
+    if faux:
+        rapport["avertissement"] = ETIQUETTE_FAUX_SERVICES
     afficher("Étape | Statut | Détail")
     for element in rapport["etapes"]:
         afficher(f"{element['etape']} | {element['statut']} | {element['detail']}")

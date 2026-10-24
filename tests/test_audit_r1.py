@@ -269,12 +269,34 @@ SCRIPTS_ARGPARSE = sorted(chemin.name for chemin in (RACINE / "scripts").glob("*
                           if "argparse" in chemin.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("script", SCRIPTS_ARGPARSE)
-def test_aide_des_scripts_en_cp1252(script):
+VERIFICATEUR_AIDE = """
+import runpy, sys
+echecs = []
+for chemin in sys.argv[1:]:
+    sys.argv = [chemin, "--help"]
+    try:
+        runpy.run_path(chemin, run_name="__main__")
+        echecs.append((chemin, "aucune sortie"))
+    except SystemExit as fin:
+        if fin.code not in (0, None):
+            echecs.append((chemin, fin.code))
+    except Exception as erreur:
+        echecs.append((chemin, type(erreur).__name__))
+sys.stdout = sys.__stdout__
+print("ECHECS", echecs)
+"""
+
+
+def test_aide_des_scripts_en_cp1252():
+    # Une console Windows en cp1252 ne doit faire échouer aucune aide de script (accents, symboles).
     env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
-    resultat = subprocess.run([sys.executable, str(RACINE / "scripts" / script), "--help"], cwd=RACINE, env=env,
-                              capture_output=True, timeout=60)
-    assert resultat.returncode == 0, resultat.stderr.decode("cp1252", "replace")[-500:]
+    scripts = [str(RACINE / "scripts" / nom) for nom in SCRIPTS_ARGPARSE]
+    resultat = subprocess.run([sys.executable, "-c", VERIFICATEUR_AIDE, *scripts], cwd=RACINE, env=env,
+                              capture_output=True, timeout=300)
+    sortie = resultat.stdout.decode("cp1252", "replace")
+    assert resultat.returncode == 0, resultat.stderr.decode("cp1252", "replace")[-800:]
+    assert "ECHECS []" in sortie, sortie[-800:]
+    assert len(scripts) >= 10
 
 
 # (e) Cohérence documentation / code
