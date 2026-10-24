@@ -23,7 +23,7 @@ sys.path.insert(0, str(RACINE / "src"))
 sys.path.insert(0, str(RACINE))
 
 from rappel.config import charger
-from scripts._essai_commun import nettoyer
+from scripts._essai_commun import ecrire_rapport, executer_main, nettoyer
 
 REUSSI, ECHOUE, NON_MESURE = "REUSSI", "ECHOUE", "NON_MESURE"
 RAM_MIN_GO = 16
@@ -188,11 +188,11 @@ def main(argv=None):
         print(f"{entree['case']} | {entree['statut']} | {entree['detail']}")
     echecs = [entree["case"] for entree in lignes if entree["statut"] == ECHOUE]
     arguments.json.parent.mkdir(parents=True, exist_ok=True)
-    arguments.json.write_text(json.dumps({"confirme": arguments.confirmer, "cases": lignes, "echecs": echecs},
-                                         ensure_ascii=False, indent=2), encoding="utf-8")
+    ecrire_rapport(arguments.json, json.dumps({"confirme": arguments.confirmer, "cases": lignes, "echecs": echecs},
+                                              ensure_ascii=False, indent=2))
     print("Bilan : " + ("aucun ECHOUE" if not echecs else "ECHOUE sur " + ", ".join(echecs)))
     return 0 if not echecs else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

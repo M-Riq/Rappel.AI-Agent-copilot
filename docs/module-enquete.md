@@ -317,6 +317,7 @@ modele `.env.example`, aucun secret suivi) :
 | `SEUIL_ABSTENTION` | `seuil_abstention` | Seuil unique de `decider` et `AbstentionSeuil` (0,6) |
 | `MAX_TOURS_ENQUETE` | `max_tours_enquete` | Plafond de tours de la boucle sql (6) |
 | `LLM_MAX_APPELS` | `llm_max_appels` | Plafond d'appels LLM par execution, relances comprises (20) |
+| `LLM_MAX_APPELS_SESSION` | `llm_max_appels_session` | Plafond d'appels factures (Nightshift) pour tout le processus, verifie avant chaque appel, war room comprise (200) |
 | `LLM_APPEL_OUTILS` | `appel_outils` | `0` (defaut) : requetes dans le JSON du texte ; `1` : appels d'outils natifs `run_sql` acceptes en plus |
 | `PIPELINE_DEMO_DIR`, `ACTION_REELLE_DEMO` | idem | Pipeline de demo isole (seul dossier modifiable) ; `1` = le correctif accepte y est execute |
 | `RAYON_SEUIL_AUTO`, `RAYON_SEUIL_VALIDATION`, `RAYON_MAX_ELEMENTS`, `RAYON_ELEMENTS_CRITIQUES` | `rayon_*` | Rayon d'impact calcule par le code : auto (confiance >= 0,9), validation, refus (< 0,6, irreversible, > 3 elements) |
@@ -325,6 +326,15 @@ modele `.env.example`, aucun secret suivi) :
 | `METERLESS_DELAI_S`, `ZETARIS_DELAI_S`, `RESEAU_DELAI_CONNEXION_S` | idem | Delais de lecture (180 s pour Nightshift, 60 s pour Zetaris) et de connexion (10 s), separes |
 | `RESEAU_RELANCES`, `RESEAU_ATTENTE_BASE_S`, `RESEAU_SEUIL_COUPE_CIRCUIT` | idem | Relances des erreurs passageres (hors ligne, delai, 429, 5xx) avec attente croissante (1 s, 2 s...), coupe-circuit apres 3 echecs consecutifs (60 s) ; jamais de relance sur 401/403/404 ([client_http.py](../src/rappel/interfaces/client_http.py)) |
 | `ZETARIS_CHEMIN_SQL`, `ZETARIS_CLE_SQL` | idem | Endpoint REST du SQL et cle du SQL dans le corps (defaut `/sql-editor/sqls/run`, `sql`) |
+
+Durcissement (R4) : une requete refusee par Zetaris pour un motif de dialecte qui cite la
+construction (LIMIT, IFNULL, !=, SUBSTR) est reformulee une seule fois en SQL standard (ex. LIMIT n ->
+FETCH FIRST n ROWS ONLY), repasse les garde-fous, puis abandon propre (`erreur SQL : apres une
+reformulation : ...`) ; `requete` est toujours le SQL reellement execute. Les donnees envoyees au
+modele sont bornees (textes de 4000 caracteres, listes de 50 elements, 60 000 caracteres au total)
+et passees au masquage des secrets ; tout journal `rappel.*` est masque des sa creation ; les
+rapports et le pipeline de demo sont ecrits de facon atomique et une action interrompue (Ctrl+C)
+restaure le pipeline a l'identique.
 
 Variables hors configuration unique, conservees pour des briques optionnelles :
 `WAR_ROOM_*` (war room, hors MVP, desactivee par defaut) et `LANGFUSE_*` (traceur optionnel).

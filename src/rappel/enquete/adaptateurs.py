@@ -46,6 +46,29 @@ class _BudgetAppels:
             self.appels += 1
 
 
+class _BudgetSession:
+    """Appels facturés du processus (toutes enquêtes, war room comprise) : LLM_MAX_APPELS_SESSION."""
+
+    def __init__(self) -> None:
+        self.appels = 0
+        self.verrou = Lock()
+
+    def consommer(self, maximum: int) -> None:
+        with self.verrou:
+            if self.appels >= maximum:
+                raise LLMBudgetEpuise("Plafond LLM_MAX_APPELS_SESSION atteint pour cette session : "
+                                      "relancer le processus après accord de l'équipe")
+            self.appels += 1
+
+
+BUDGET_SESSION = _BudgetSession()
+
+
+def reinitialiser_budget_session() -> None:
+    with BUDGET_SESSION.verrou:
+        BUDGET_SESSION.appels = 0
+
+
 @contextmanager
 def limiter_appels(llm, restants: int):
     budget = getattr(llm, "_budget", None)
@@ -87,6 +110,7 @@ class LLMEnquete:
     def __init__(self, fournisseur, configuration: Configuration | None = None, budget=None) -> None:
         configuration = configuration or charger()
         self.fournisseur = fournisseur
+        self._max_session = configuration.llm_max_appels_session
         self._budget = budget or _BudgetAppels(configuration.llm_max_appels)
         self.usage = UsageLLM(par_voie=usage_par_voie())
         self.derniere_reponse_info: dict | None = None
@@ -110,7 +134,10 @@ class LLMEnquete:
         return choisir(role) if callable(choisir) else None
 
     def completer(self, prompt: str, role: str = "detective", tools: list | None = None) -> str:
+        # Plafonds vérifiés AVANT tout appel : par exécution, puis par session si l'appel est facturé.
         self._budget.consommer()
+        if getattr(self.fournisseur, "facture", False):
+            BUDGET_SESSION.consommer(self._max_session)
         voie = voie_pour_role(role)
         compteur = self.usage.par_voie[voie]
         self.usage.nb_appels += 1

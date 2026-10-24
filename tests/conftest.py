@@ -23,6 +23,11 @@ def environnement_local(monkeypatch, tmp_path):
     for nom in ("ACTION_REELLE_DEMO", "WAR_ROOM_ACTIVE"):
         monkeypatch.delenv(nom, raising=False)
 
+    # Budget d'appels facturés : remis à zéro à chaque test (il est global au processus).
+    from rappel.enquete.adaptateurs import reinitialiser_budget_session
+
+    reinitialiser_budget_session()
+
     def interdire_reseau(*args, **kwargs):
         raise AssertionError("Appel réseau interdit dans les tests.")
 

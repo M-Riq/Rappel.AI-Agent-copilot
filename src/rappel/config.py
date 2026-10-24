@@ -30,6 +30,8 @@ class Configuration:
     seuil_abstention: float = 0.6
     max_tours_enquete: int = 6
     llm_max_appels: int = 20
+    # Plafond d'appels facturés (Nightshift) pour tout le processus, toutes enquêtes confondues.
+    llm_max_appels_session: int = 200
     # Appels d'outils natifs (tool_calls run_sql) ; 0 = JSON dans le texte (defaut).
     appel_outils: bool = False
     # Pipeline de demo isole (Module B) : seul dossier que l'action peut modifier.
@@ -67,8 +69,8 @@ class Configuration:
             raise ValueError("SEUIL_ABSTENTION doit être compris entre 0 et 1.")
         if self.max_tours_enquete < 1:
             raise ValueError("MAX_TOURS_ENQUETE doit être positif.")
-        if self.llm_max_appels < 1:
-            raise ValueError("LLM_MAX_APPELS doit être positif.")
+        if self.llm_max_appels < 1 or self.llm_max_appels_session < 1:
+            raise ValueError("LLM_MAX_APPELS et LLM_MAX_APPELS_SESSION doivent être positifs.")
         if not 0 <= self.rayon_seuil_validation <= self.rayon_seuil_auto <= 1:
             raise ValueError("RAYON_SEUIL_VALIDATION et RAYON_SEUIL_AUTO doivent vérifier 0 <= validation <= auto <= 1.")
         if self.rayon_max_elements < 1:
@@ -104,6 +106,7 @@ def charger() -> Configuration:
         ("seuil_abstention", float),
         ("max_tours_enquete", int),
         ("llm_max_appels", int),
+        ("llm_max_appels_session", int),
         ("rayon_seuil_auto", float),
         ("rayon_seuil_validation", float),
         ("rayon_max_elements", int),

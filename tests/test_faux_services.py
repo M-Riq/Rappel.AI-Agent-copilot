@@ -196,7 +196,8 @@ def test_run_sql_zetaris_resultat_volumineux_tronque(zetaris):
 def test_run_sql_zetaris_erreur_lisible(zetaris):
     resultat = RunSqlZetaris(contexte_fixture("p1"), configuration_zetaris(zetaris)).executer(
         "SELECT template FROM logs WHERE compte = 'x' GROUP BY")
-    assert resultat.erreur.startswith("erreur SQL : Zetaris : dialecte ou syntaxe SQL refusé")
+    # Une reformulation guidée (LIMIT cité par le moteur) est tentée une fois, puis abandon propre.
+    assert resultat.erreur.startswith("erreur SQL : apres une reformulation : Zetaris : dialecte ou syntaxe SQL refusé")
     assert zetaris.cle not in resultat.erreur
 
 

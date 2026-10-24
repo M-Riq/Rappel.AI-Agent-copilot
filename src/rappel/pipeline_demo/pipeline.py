@@ -49,8 +49,9 @@ def lire_json(chemin: Path):
 
 
 def ecrire_json(chemin: Path, donnees) -> None:
-    chemin.parent.mkdir(parents=True, exist_ok=True)
-    chemin.write_text(json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from rappel.securite import ecrire_texte_atomique
+
+    ecrire_texte_atomique(chemin, json.dumps(donnees, ensure_ascii=False, indent=2) + "\n")
 
 
 def _maintenant() -> datetime:

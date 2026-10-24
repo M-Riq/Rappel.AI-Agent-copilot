@@ -67,3 +67,18 @@ class LLMCapture:
         if self.brut:
             afficher(f"Brut ({role}, 400 caracteres max) : {nettoyer(reponse)[:400]}")
         return reponse
+
+def ecrire_rapport(chemin, texte: str) -> None:
+    """Rapport écrit de façon atomique : un Ctrl+C ne laisse jamais de fichier tronqué."""
+    from rappel.securite import ecrire_texte_atomique
+
+    ecrire_texte_atomique(chemin, texte)
+
+
+def executer_main(main) -> int:
+    """Code de sortie de main ; Ctrl+C donne un arrêt propre (code 130) sans trace ni fichier partiel."""
+    try:
+        return main()
+    except KeyboardInterrupt:
+        print("Interrompu (Ctrl+C) : arrêt propre, aucun rapport partiel écrit.")
+        return 130

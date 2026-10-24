@@ -30,6 +30,7 @@ NB_HYPOTHESES_MIN = 2
 CONFIANCE_PAR_REQUETE_NON_VIDE = 0.45
 CONFIANCE_MAX = 0.95
 LIGNES_DANS_PROMPT = 10
+LONGUEUR_MAX_DONNEES_PROMPT = 60_000
 APERCU_LIGNES_EVENEMENT = 3
 RAISON_SANS_PREUVE = "aucune preuve SQL"
 REQUETES_TYPES = {
@@ -260,7 +261,13 @@ def description_outil() -> str:
 
 
 def construire_prompt(role: str, consignes: str, donnees: dict, note: str = "") -> str:
-    return f"Role: {role}. {consignes}\n{note}{MARQUEUR_DONNEES}{json.dumps(donnees, ensure_ascii=False)}"
+    # Garde-fou : jamais de données volumineuses ni de secret de l'environnement dans un prompt.
+    from rappel.securite import borner, masquer_secrets
+
+    texte = json.dumps(borner(donnees), ensure_ascii=False)
+    if len(texte) > LONGUEUR_MAX_DONNEES_PROMPT:
+        texte = json.dumps(borner(donnees, longueur_texte=500, elements=10), ensure_ascii=False)
+    return masquer_secrets(f"Role: {role}. {consignes}\n{note}{MARQUEUR_DONNEES}{texte}")
 
 
 def apercu(texte: str, longueur: int = 160) -> str:

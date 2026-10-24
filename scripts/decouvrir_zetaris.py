@@ -23,7 +23,7 @@ sys.path.insert(0, str(RACINE / "src"))
 
 import requests
 
-from scripts._essai_commun import afficher, nettoyer
+from scripts._essai_commun import afficher, ecrire_rapport, executer_main, nettoyer
 from rappel.config import charger
 from rappel.interfaces.run_sql import TABLES
 from rappel.securite import url_service
@@ -152,10 +152,10 @@ def main(argv=None) -> int:
     for cle, valeur in rapport["proposition"].items():
         afficher(f"Proposé pour .env : {cle}={valeur}")
     arguments.json.parent.mkdir(parents=True, exist_ok=True)
-    arguments.json.write_text(nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)), encoding="utf-8")
+    ecrire_rapport(arguments.json, nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)))
     ok = rapport["select_1"]["statut"] == REUSSI and rapport["tables"].get("statut") == REUSSI
     return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

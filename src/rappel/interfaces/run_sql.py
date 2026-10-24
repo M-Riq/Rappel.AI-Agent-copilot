@@ -408,23 +408,63 @@ class RunSqlZetaris:
     def __repr__(self) -> str:
         return f"RunSqlZetaris(mode={self.mode!r})"
 
+    @staticmethod
+    def _erreur(requete, erreur, validation, prefixe="") -> ResultatSql:
+        message = str(erreur)
+        if any(mot in message.lower() for mot in ("bearer", "authorization", "x-org-id", "api_key")):
+            message = "Zetaris indisponible"
+        return ResultatSql(requete=requete, colonnes=[], lignes=[], nb_lignes=0, tronque=False,
+                           erreur=f"erreur SQL : {prefixe}{message}", tables=validation.tables)
+
     def executer(self, sql: str) -> ResultatSql:
         validation = valider_sql(sql, self.tables_autorisees)
         if validation.erreur is not None:
             return resultat_refuse(validation)
+        requete = validation.requete
         try:
-            reponse = tools_zetaris.run_sql(validation.requete, configuration=self.configuration)
+            reponse = tools_zetaris.run_sql(requete, configuration=self.configuration)
         except (ValueError, RuntimeError) as erreur:
-            message = str(erreur)
-            if any(mot in message.lower() for mot in ("bearer", "authorization", "x-org-id", "api_key")):
-                message = "Zetaris indisponible"
-            return ResultatSql(requete=validation.requete, colonnes=[], lignes=[], nb_lignes=0,
-                               tronque=False, erreur=f"erreur SQL : {message}", tables=validation.tables)
+            reformulee = reformuler_dialecte(requete, erreur, self.tables_autorisees)
+            if reformulee is None:
+                return self._erreur(requete, erreur, validation)
+            # Une seule reformulation guidée par le message (assaini) du moteur, puis abandon propre.
+            requete = reformulee
+            try:
+                reponse = tools_zetaris.run_sql(requete, configuration=self.configuration)
+            except (ValueError, RuntimeError) as seconde:
+                return self._erreur(requete, seconde, validation, "apres une reformulation : ")
         colonnes, lignes = _lignes_tabulaires(reponse.get("lignes", []))
         tronque = len(lignes) > LIMITE_LIGNES or (validation.limite_ajoutee and len(lignes) >= LIMITE_LIGNES)
         lignes = lignes[:LIMITE_LIGNES]
-        return ResultatSql(requete=validation.requete, colonnes=colonnes, lignes=lignes,
+        # requete : le SQL réellement exécuté (éventuellement reformulé une fois).
+        return ResultatSql(requete=requete, colonnes=colonnes, lignes=lignes,
                            nb_lignes=len(lignes), tronque=tronque, tables=validation.tables)
+
+
+# Réécritures standard, appliquées seulement si le message du moteur désigne la construction.
+REECRITURES_DIALECTE = (
+    ("limit", re.compile(r"\s+LIMIT\s+(\d+)\s*$", re.IGNORECASE), r" FETCH FIRST \1 ROWS ONLY"),
+    ("ifnull", re.compile(r"\bIFNULL\s*\(", re.IGNORECASE), "COALESCE("),
+    ("!=", re.compile(r"!="), "<>"),
+    ("substr", re.compile(r"\bSUBSTR\s*\(", re.IGNORECASE), "SUBSTRING("),
+)
+
+
+def reformuler_dialecte(requete: str, erreur: Exception, tables_autorisees) -> str | None:
+    """Requête réécrite en SQL standard si l'erreur est un refus de dialecte qui cite la construction.
+
+    La requête réécrite repasse les garde-fous ; None si aucune réécriture ne s'applique.
+    """
+    if getattr(erreur, "categorie", None) != "syntaxe_sql":
+        return None
+    message = str(getattr(erreur, "detail", None) or erreur).lower()
+    reecrite = requete
+    for mot, motif, remplacement in REECRITURES_DIALECTE:
+        if mot in message:
+            reecrite = motif.sub(remplacement, reecrite)
+    if reecrite == requete or valider_sql(reecrite, tables_autorisees).erreur is not None:
+        return None
+    return reecrite
 
 
 def creer_run_sql(contexte: ContexteIncident | dict, configuration: Configuration | None = None) -> RunSql:

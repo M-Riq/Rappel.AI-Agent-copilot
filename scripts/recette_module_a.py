@@ -17,7 +17,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, autoriser, nettoyer
+from scripts._essai_commun import ecrire_rapport, executer_main, ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, autoriser, nettoyer
 from scripts.stabilite_p1 import mesurer_stabilite
 from rappel.config import Configuration, charger
 from rappel.contrats import valider
@@ -355,7 +355,7 @@ def main(argv=None, fabrique_llm=None):
         afficher_rapport(rapport)
         destination = arguments.json.resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n", encoding="utf-8")
+        ecrire_rapport(destination, nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n")
         afficher(f"Rapport ecrit : {destination.name}")
         return 0 if not rapport["echecs"] else 1
     except Exception:
@@ -364,4 +364,4 @@ def main(argv=None, fabrique_llm=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

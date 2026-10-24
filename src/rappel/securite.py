@@ -7,8 +7,11 @@
 """
 
 import ipaddress
+import logging
 import os
+from pathlib import Path
 import re
+import tempfile
 from urllib.parse import urlsplit, urlunsplit
 
 MOTS_SENSIBLES = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "DATABASE_URL", "JETON")
@@ -85,3 +88,55 @@ def url_service(url: str, nom: str, suffixes_a_retirer: tuple[str, ...] = (),
     hote = parties.hostname if ":" not in parties.hostname else f"[{parties.hostname}]"
     reseau = hote + (f":{port}" if port else "")
     return urlunsplit((parties.scheme.lower(), reseau, chemin, "", ""))
+
+
+def borner(objet, longueur_texte: int = 4000, elements: int = 50):
+    """Copie bornée d'une structure JSON : textes tronqués, listes et dictionnaires limités."""
+    if isinstance(objet, str):
+        return objet if len(objet) <= longueur_texte else objet[:longueur_texte] + "...[tronque]"
+    if isinstance(objet, list):
+        return [borner(element, longueur_texte, elements) for element in objet[:elements]]
+    if isinstance(objet, dict):
+        return {cle: borner(valeur, longueur_texte, elements) for cle, valeur in list(objet.items())[:elements]}
+    return objet
+
+
+_FABRIQUE_INSTALLEE = {"fait": False}
+
+
+def installer_filtre_journal() -> None:
+    """Masque les secrets de tout enregistrement de journal des modules rappel.* dès sa création.
+
+    Une fabrique d'enregistrements couvre aussi les journaux enfants (rappel.interfaces...), ce que
+    ne fait pas un filtre posé sur le seul journal « rappel ».
+    """
+    if _FABRIQUE_INSTALLEE["fait"]:
+        return
+    precedente = logging.getLogRecordFactory()
+
+    def fabrique(*args, **kwargs):
+        enregistrement = precedente(*args, **kwargs)
+        if enregistrement.name == "rappel" or enregistrement.name.startswith("rappel."):
+            try:
+                message = enregistrement.getMessage()
+            except Exception:
+                message = str(enregistrement.msg)
+            enregistrement.msg, enregistrement.args = masquer_secrets(message), None
+        return enregistrement
+
+    logging.setLogRecordFactory(fabrique)
+    _FABRIQUE_INSTALLEE["fait"] = True
+
+
+def ecrire_texte_atomique(chemin, texte: str) -> None:
+    """Écrit via un fichier temporaire du même dossier puis le remplace : jamais de fichier tronqué (Ctrl+C)."""
+    chemin = Path(chemin)
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    descripteur, temporaire = tempfile.mkstemp(dir=chemin.parent, prefix=f".{chemin.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descripteur, "w", encoding="utf-8", newline="") as fichier:
+            fichier.write(texte)
+        os.replace(temporaire, chemin)
+    finally:
+        if os.path.exists(temporaire):
+            os.unlink(temporaire)

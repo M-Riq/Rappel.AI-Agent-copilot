@@ -123,7 +123,12 @@ def executer_correctif(correctif, decision: str | None = None, dossier=None,
         ecrire_json(fichiers["mapping"], actuel)
         etat = executer_pipeline(dossier)
         reussi = etat["statut"] == "vert" and not simuler_echec
-    except Exception:
+    except BaseException as interruption:
+        # Ctrl+C ou erreur pendant l'action : état restauré à l'identique avant de propager l'arrêt.
+        _vider(racine)
+        _copier_etat(sauvegarde, racine)
+        if not isinstance(interruption, Exception):
+            raise
         reussi = False
     if reussi:
         return _resultat(EXECUTE, niveau, raisons, avant, empreinte_dossier(dossier),

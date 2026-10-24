@@ -70,8 +70,11 @@ class FauxZetaris(ServeurLocal):
         if scenario in ("401", "500", "429"):
             return int(scenario), {"message": f"erreur simulee {scenario}"}, None
         sql = corps[self.cle_sql]
-        if self.refuser_limit and re.search(r"\blimit\b", sql, re.IGNORECASE):
+        if scenario == "syntaxe_limit" or (self.refuser_limit and re.search(r"\blimit\b", sql, re.IGNORECASE)):
             return 400, {"message": "Syntax error: mismatched input 'LIMIT' expecting <EOF>"}, None
+        if self.refuser_limit:
+            # Dialecte imité : FETCH FIRST n ROWS ONLY accepté (traduit pour SQLite).
+            sql = re.sub(r"\s+FETCH\s+FIRST\s+(\d+)\s+ROWS\s+ONLY\s*$", r" LIMIT \1", sql, flags=re.IGNORECASE)
         if scenario == "volumineux":
             return 200, {"columns": [{"name": "n"}], "rows": [[numero] for numero in range(10_000)]}, None
         return self._executer(sql)

@@ -17,7 +17,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import afficher, autoriser, nettoyer
+from scripts._essai_commun import ecrire_rapport, executer_main, afficher, autoriser, nettoyer
 from rappel.action.executeur import EXECUTE, executer_correctif
 from rappel.config import charger
 from rappel.enquete import enqueter
@@ -128,7 +128,7 @@ def main(argv=None, fabrique_llm=None):
         afficher("Bilan : " + ("aucun ECHOUE" if not rapport["echecs"] else "ECHOUE : " + ", ".join(rapport["echecs"])))
         destination = arguments.json.resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n", encoding="utf-8")
+        ecrire_rapport(destination, nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n")
         return 0 if not rapport["echecs"] else 1
     except Exception:
         afficher("Recette globale impossible : verifier la configuration ; aucun detail sensible affiche.")
@@ -136,4 +136,4 @@ def main(argv=None, fabrique_llm=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

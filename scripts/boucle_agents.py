@@ -18,7 +18,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import afficher, autoriser, nettoyer
+from scripts._essai_commun import afficher, autoriser, ecrire_rapport, executer_main, nettoyer
 from rappel.config import charger
 from rappel.orchestration.boucle import chemin_journal, executer_sequence, surveiller
 from rappel.pipeline_demo import NOMS_SCENARIOS
@@ -96,11 +96,10 @@ def main(argv=None, fabrique_llm=None, memoire=None) -> int:
         afficher(ligne_cycle(cycle.resume))
     resumes = [cycle.resume for cycle in cycles]
     arguments.json.parent.mkdir(parents=True, exist_ok=True)
-    arguments.json.write_text(nettoyer(json.dumps({"cycles": resumes}, ensure_ascii=False, indent=2)) + "\n",
-                              encoding="utf-8")
+    ecrire_rapport(arguments.json, nettoyer(json.dumps({"cycles": resumes}, ensure_ascii=False, indent=2)) + "\n")
     afficher(f"Journal : {chemin_journal(configuration).name} ; résumé : {arguments.json.name}")
     return 0 if all(resume["statut"] in ("termine", "aucune_anomalie") for resume in resumes) else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

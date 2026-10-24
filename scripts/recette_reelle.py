@@ -28,7 +28,7 @@ RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))
 sys.path.insert(0, str(RACINE / "src"))
 
-from scripts._essai_commun import ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, nettoyer
+from scripts._essai_commun import ecrire_rapport, executer_main, ETIQUETTE_FAUX_SERVICES, afficher, annoncer_faux_services, nettoyer
 from rappel.config import charger
 
 REUSSI, ECHOUE, NON_MESURE = "REUSSI", "ECHOUE", "NON_MESURE"
@@ -246,10 +246,10 @@ def main(argv=None, fabrique_llm=None, verifications=None, lancer_boucle=None) -
     afficher("Bilan : " + ("aucun ECHOUE" if not rapport["echecs"] else "ECHOUE sur " + ", ".join(rapport["echecs"]))
              + (f" ; NON_MESURE : {', '.join(rapport['non_mesures'])}" if rapport["non_mesures"] else ""))
     arguments.json.parent.mkdir(parents=True, exist_ok=True)
-    arguments.json.write_text(nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n", encoding="utf-8")
+    ecrire_rapport(arguments.json, nettoyer(json.dumps(rapport, ensure_ascii=False, indent=2)) + "\n")
     afficher(f"Rapport écrit : {arguments.json.name}")
     return 0 if not rapport["echecs"] else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))

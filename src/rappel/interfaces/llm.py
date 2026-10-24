@@ -92,6 +92,8 @@ def _texte_message(contenu) -> str:
 
 
 class MeterlessLLM:
+    facture = True  # appels comptés dans LLM_MAX_APPELS_SESSION
+
     def __init__(self, configuration: Configuration | None = None, client=None):
         from rappel.interfaces.client_http import ClientService
 

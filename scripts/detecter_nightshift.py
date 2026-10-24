@@ -21,7 +21,7 @@ sys.path.insert(0, str(RACINE / "src"))
 
 import requests
 
-from scripts._essai_commun import afficher, nettoyer
+from scripts._essai_commun import afficher, ecrire_rapport, executer_main, nettoyer
 
 HOTES = ("127.0.0.1", "localhost", "[::1]")
 PORTS = (8088, 8090, 8787, 11434)
@@ -136,10 +136,10 @@ def main(argv=None) -> int:
     else:
         afficher("Nightshift introuvable : le démarrer (console Meterless) puis relancer ; vérifier le port.")
     arguments.json.parent.mkdir(parents=True, exist_ok=True)
-    arguments.json.write_text(nettoyer(json.dumps({"sondes": resultats, "proposition": proposition},
-                                                  ensure_ascii=False, indent=2)), encoding="utf-8")
+    ecrire_rapport(arguments.json, nettoyer(json.dumps({"sondes": resultats, "proposition": proposition},
+                                                       ensure_ascii=False, indent=2)))
     return 0 if proposition["trouve"] else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(executer_main(main))
