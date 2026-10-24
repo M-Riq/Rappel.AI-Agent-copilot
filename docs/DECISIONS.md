@@ -34,3 +34,5 @@ Règles :
 | 23 oct. 2026 | Action réelle limitée au pipeline de démo isolé, désactivée par défaut (`ACTION_REELLE_DEMO=0`) | aucune action irréversible pendant les essais |
 | 23 oct. 2026 | Plafond de 3 enquêtes par session dans l'interface | limiter les appels au modèle pendant la démo |
 | 23 oct. 2026 | Langfuse optionnel, désactivé sans clés | aucun paquet supplémentaire imposé |
+| 24 oct. 2026 | Fusion de `naomy/complement-modules` dans `main` sans relecture de Juan (pipeline_demo, ingestion, action) ni d'Yvan (ui, Langfuse) ; relecture à faire après la fusion | 626 tests passent en mode simulé ; débloquer l'intégration Meterless. Décision : Riq |
+
