@@ -1,13 +1,10 @@
-import os
-
 from rappel.config import charger
+from rappel.securite import masquer_secrets
 
 
 def nettoyer(texte: str) -> str:
-    for nom, valeur in os.environ.items():
-        if valeur and any(mot in nom.upper() for mot in ("KEY", "SECRET", "TOKEN", "PASSWORD")):
-            texte = texte.replace(valeur, "[MASQUE]")
-    return texte
+    # Valeurs sensibles de l'environnement, identifiants dans les URL et jetons « Bearer ».
+    return masquer_secrets(texte)
 
 
 def afficher(texte: str) -> None:

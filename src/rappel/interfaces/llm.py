@@ -4,6 +4,15 @@ import requests
 
 from rappel.config import Configuration, charger
 from rappel.interfaces import _faux_sql
+from rappel.securite import url_service
+
+# Suffixes d'endpoint parfois collés par erreur à METERLESS_BASE_URL.
+SUFFIXES_METERLESS = ("/chat/completions", "/models", "/healthz")
+
+
+def url_meterless(configuration: Configuration) -> str:
+    """Racine OpenAI-compatible validée : http(s), hôte, aucun identifiant, « /v1 » une seule fois."""
+    return url_service(configuration.meterless_base_url, "METERLESS_BASE_URL", SUFFIXES_METERLESS, "/v1")
 
 # Rôles de la boucle d'enquête SQL ; les autres rôles gardent leur comportement.
 ROLES_ENQUETE_RAPIDES = ("hypotheses", "verdict")
@@ -73,12 +82,15 @@ class MeterlessLLM:
         if tools is not None:
             corps["tools"] = tools
         entetes = self.entetes()
+        racine = url_meterless(configuration)
         try:
+            # Pas de redirection : le jeton n'est envoyé qu'à l'hôte configuré.
             reponse = requests.post(
-                f"{configuration.meterless_base_url.rstrip('/')}/chat/completions",
+                f"{racine}/chat/completions",
                 headers=entetes,
                 json=corps,
                 timeout=60,
+                allow_redirects=False,
             )
             if reponse.status_code == 401:
                 raise RuntimeError(

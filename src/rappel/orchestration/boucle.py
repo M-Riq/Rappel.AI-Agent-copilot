@@ -15,7 +15,6 @@ texte du modèle ni de secret.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 from time import monotonic, perf_counter, sleep
 from uuid import uuid4
@@ -42,12 +41,10 @@ def chemin_journal(configuration: Configuration | None = None) -> Path:
 
 
 def assainir(texte: str) -> str:
-    """Masque toute valeur de variable d'environnement sensible qui apparaîtrait dans un texte."""
-    texte = str(texte)
-    for nom, valeur in os.environ.items():
-        if valeur and len(valeur) >= 4 and any(mot in nom.upper() for mot in MOTS_SECRETS):
-            texte = texte.replace(valeur, "[MASQUE]")
-    return texte
+    """Masque toute valeur sensible (environnement, identifiants d'URL, jetons) dans un texte."""
+    from rappel.securite import masquer_secrets
+
+    return masquer_secrets(texte)
 
 
 def _maintenant() -> str:

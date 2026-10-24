@@ -31,6 +31,10 @@ MOTS_INTERDITS = frozenset({
     "replace", "truncate", "grant", "revoke", "vacuum", "reindex", "analyze", "merge", "upsert",
     "exec", "execute", "call", "copy", "load", "into", "set", "commit", "rollback", "begin",
     "savepoint", "release", "lock", "unload", "import", "export", "load_extension",
+    # Fonctions dangereuses selon les moteurs (lecture de fichiers, réseau, attente, commandes).
+    "sleep", "pg_sleep", "benchmark", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "lo_import",
+    "lo_export", "dblink", "load_file", "readfile", "writefile", "outfile", "dumpfile", "xp_cmdshell",
+    "openrowset", "opendatasource", "openquery", "fts3_tokenizer", "edit",
 })
 MOTS_APRES_TABLE = frozenset({
     "where", "join", "inner", "left", "right", "full", "outer", "cross", "natural", "on",
@@ -80,6 +84,10 @@ def _retirer_commentaires_et_chaines(sql: str) -> tuple[str, str]:
     indice, taille = 0, len(sql)
     while indice < taille:
         caractere = sql[indice]
+        if ord(caractere) > 127 or (ord(caractere) < 32 and caractere not in "\t\n\r"):
+            # Hors chaînes littérales : ASCII imprimable seulement (homoglyphes, espaces et
+            # points-virgules Unicode, octets nuls et caractères de contrôle refusés).
+            raise _RequeteRefusee("caractere non ASCII ou de controle hors chaine litterale")
         if sql.startswith("--", indice):
             fin = sql.find("\n", indice)
             indice = taille if fin == -1 else fin

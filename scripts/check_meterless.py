@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import requests
 
 from rappel.config import charger
-from rappel.interfaces.llm import MeterlessLLM
+from rappel.interfaces.llm import MeterlessLLM, url_meterless
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
         configuration = charger()
         llm = MeterlessLLM(configuration)
         reponse = requests.get(
-            f"{configuration.meterless_base_url.rstrip('/')}/models",
+            f"{url_meterless(configuration)}/models",
             headers=llm.entetes(),
             timeout=5,
         )
@@ -32,7 +32,7 @@ def main():
         if "nemotron" not in str(modele_effectif).lower():
             print("AVERTISSEMENT : le modèle effectif n'est pas un Nemotron confirmé.")
         return 0
-    except (requests.RequestException, ValueError, TypeError, KeyError, RuntimeError):
+    except (requests.RequestException, ValueError, TypeError, KeyError, RuntimeError):  # message sans détail
         print("Connexion Meterless impossible. Vérifiez le service et sa configuration.")
         return 1
 

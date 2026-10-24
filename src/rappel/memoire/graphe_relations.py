@@ -16,12 +16,12 @@ Sorties : {"noeuds", "aretes"} (JSON) et texte Mermaid.
 """
 
 import hashlib
-import os
 import re
+
+from rappel.securite import masquer_secrets
 
 TYPES_NOEUDS = ("incident", "signature", "hypothese_retenue", "hypothese_refutee", "cause", "correctif")
 LONGUEUR_LIBELLE = 80
-MOTS_SECRETS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "DATABASE_URL")
 FORMES_MERMAID = {
     "incident": ('["', '"]'), "signature": ('(["', '"])'), "hypothese_retenue": ('("', '")'),
     "hypothese_refutee": ('("', '")'), "cause": ('{{"', '"}}'), "correctif": ('[/"', '"/]'),
@@ -29,10 +29,7 @@ FORMES_MERMAID = {
 
 
 def _assainir(texte) -> str:
-    texte = " ".join(str(texte).split())
-    for nom, valeur in os.environ.items():
-        if valeur and len(valeur) >= 4 and any(mot in nom.upper() for mot in MOTS_SECRETS):
-            texte = texte.replace(valeur, "[MASQUE]")
+    texte = masquer_secrets(" ".join(str(texte).split()))
     return texte if len(texte) <= LONGUEUR_LIBELLE else texte[:LONGUEUR_LIBELLE - 3] + "..."
 
 

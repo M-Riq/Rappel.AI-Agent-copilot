@@ -55,12 +55,24 @@ def _resultat(statut, niveau, raisons, avant, apres, message, pipeline=None, sau
             "sauvegarde": sauvegarde, "message": message, "simulation": True}
 
 
+def liens_hors_dossier(racine: Path) -> list[str]:
+    """Liens symboliques ou jonctions du pipeline : interdits (ils pourraient sortir du dossier isolé)."""
+    trouves = []
+    for chemin in [racine, *racine.rglob("*")]:
+        est_jonction = getattr(chemin, "is_junction", lambda: False)()
+        if chemin.is_symlink() or est_jonction or not chemin.resolve().is_relative_to(racine):
+            trouves.append(chemin.relative_to(racine).as_posix() or ".")
+    return trouves
+
+
 def _copier_etat(source: Path, cible: Path) -> None:
     for element in source.iterdir():
         if element.name == DOSSIER_SAUVEGARDES:
             continue
         destination = cible / element.name
-        shutil.copytree(element, destination) if element.is_dir() else shutil.copy2(element, destination)
+        # symlinks=True : un lien éventuel est copié comme lien, jamais suivi hors du dossier.
+        shutil.copytree(element, destination, symlinks=True) if element.is_dir() else shutil.copy2(
+            element, destination, follow_symlinks=False)
 
 
 def _vider(racine: Path) -> None:
@@ -77,6 +89,9 @@ def executer_correctif(correctif, decision: str | None = None, dossier=None,
     if not (racine == autorise or racine.is_relative_to(autorise)) or not chemins(dossier)["config"].is_file():
         return _resultat(REFUSE, None, ["chemin hors du pipeline de démo"], None, None,
                          "Action refusée : seul le pipeline de démo isolé peut être modifié.")
+    if liens_hors_dossier(racine):
+        return _resultat(REFUSE, None, ["lien symbolique dans le pipeline de démo"], None, None,
+                         "Action refusée : le pipeline de démo contient un lien symbolique ou une jonction.")
     avant = empreinte_dossier(dossier)
     niveau, raisons = expliquer_rayon_impact(correctif, configuration)
     if decision == "refuser" or niveau == REFUS:

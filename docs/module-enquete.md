@@ -318,6 +318,10 @@ modele `.env.example`, aucun secret suivi) :
 | `MAX_TOURS_ENQUETE` | `max_tours_enquete` | Plafond de tours de la boucle sql (6) |
 | `LLM_MAX_APPELS` | `llm_max_appels` | Plafond d'appels LLM par execution, relances comprises (20) |
 | `LLM_APPEL_OUTILS` | `appel_outils` | `0` (defaut) : requetes dans le JSON du texte ; `1` : appels d'outils natifs `run_sql` acceptes en plus |
+| `PIPELINE_DEMO_DIR`, `ACTION_REELLE_DEMO` | idem | Pipeline de demo isole (seul dossier modifiable) ; `1` = le correctif accepte y est execute |
+| `RAYON_SEUIL_AUTO`, `RAYON_SEUIL_VALIDATION`, `RAYON_MAX_ELEMENTS`, `RAYON_ELEMENTS_CRITIQUES` | `rayon_*` | Rayon d'impact calcule par le code : auto (confiance >= 0,9), validation, refus (< 0,6, irreversible, > 3 elements) |
+| `BOUCLE_JOURNAL_PATH` | `boucle_journal_path` | Journal de la boucle des 4 agents (sans secret) |
+| `API_URL` | `api_url` | URL de l'API lue par l'interface Streamlit |
 
 Variables hors configuration unique, conservees pour des briques optionnelles :
 `WAR_ROOM_*` (war room, hors MVP, desactivee par defaut) et `LANGFUSE_*` (traceur optionnel).

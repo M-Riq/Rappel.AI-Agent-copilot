@@ -9,6 +9,7 @@ from uuid import uuid4
 import requests
 
 from rappel.config import RACINE, charger
+from rappel.securite import url_service
 
 # TODO : confirmer le corps via http://localhost:8888/redoc/index.html.
 CLE_SQL_CORPS = "sql"
@@ -133,9 +134,11 @@ def run_sql(sql, *, configuration=None, scenario="p1"):
         return {"requete": sql, "lignes": _lignes_fichier(sql, scenario)}
     if not configuration.zetaris_api_key:
         raise ValueError("ZETARIS_API_KEY est requise pour Zetaris.")
+    racine = url_service(configuration.zetaris_base_url, "ZETARIS_BASE_URL", ("/sql-editor/sqls/run",))
     try:
+        # Pas de redirection : la clé n'est envoyée qu'à l'hôte configuré.
         reponse = requests.post(
-            f"{configuration.zetaris_base_url.rstrip('/')}/sql-editor/sqls/run",
+            f"{racine}/sql-editor/sqls/run",
             headers={
                 "Authorization": "Bearer " + configuration.zetaris_api_key,
                 "X-Org-ID": configuration.zetaris_org_id,
@@ -143,6 +146,7 @@ def run_sql(sql, *, configuration=None, scenario="p1"):
             },
             json={CLE_SQL_CORPS: sql},
             timeout=30,
+            allow_redirects=False,
         )
         reponse.raise_for_status()
         donnees = reponse.json()

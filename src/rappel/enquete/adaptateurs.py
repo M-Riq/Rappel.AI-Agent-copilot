@@ -18,6 +18,9 @@ from rappel.interfaces import llm as llm_squelette
 from rappel.interfaces import memoire as memoire_squelette
 
 
+_VERROU_NON_CONFIRMES = Lock()
+
+
 class LLMIndisponible(RuntimeError):
     """Fournisseur LLM inaccessible ou réponse non conforme."""
 
@@ -235,7 +238,8 @@ class MemoireEnquete:
 
     def vider(self) -> int:
         nombre = self.backend.vider()
-        self._ecrire_non_confirmes([])
+        with _VERROU_NON_CONFIRMES:
+            self._ecrire_non_confirmes([])
         return nombre
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
@@ -270,14 +274,18 @@ class MemoireEnquete:
         chemin = self.chemin_non_confirmes
         if not cles and not chemin.exists():
             return
-        chemin.parent.mkdir(parents=True, exist_ok=True)
-        chemin.write_text(json.dumps(cles, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Écriture atomique (fichier temporaire puis remplacement) : jamais de fichier tronqué.
+        memoire_squelette.MemoireJSON._ecrire_liste(chemin, cles)
 
     def marquer_non_confirme(self, enregistrement: EnregistrementMemoire) -> None:
-        cles = self._lire_non_confirmes()
-        cle = self._cle(enregistrement)
-        if cle not in cles:
-            self._ecrire_non_confirmes([*cles, cle])
+        with _VERROU_NON_CONFIRMES:
+            existantes = {tuple(self._cle(souvenir)) for souvenir in self.lister()}
+            # Les clés orphelines (souvenir effacé ou mémoire remplacée) sont purgées au passage.
+            cles = [cle for cle in self._lire_non_confirmes() if tuple(cle) in existantes]
+            cle = self._cle(enregistrement)
+            if cle not in cles:
+                cles.append(cle)
+            self._ecrire_non_confirmes(cles)
 
     def statut_resultat(self, souvenir: EnregistrementMemoire) -> str:
         """reussi, echoue ou non_confirme (souvenir provisoire en attente du résultat de l'action)."""
@@ -288,9 +296,10 @@ class MemoireEnquete:
         mis_a_jour = self.backend.mettre_a_jour_resultat(signature, resultat)
         if mis_a_jour and souvenirs:
             cle = self._cle(souvenirs[-1])
-            cles = self._lire_non_confirmes()
-            if cle in cles:
-                self._ecrire_non_confirmes([element for element in cles if element != cle])
+            with _VERROU_NON_CONFIRMES:
+                cles = self._lire_non_confirmes()
+                if cle in cles:
+                    self._ecrire_non_confirmes([element for element in cles if element != cle])
         return mis_a_jour
 
     def ecrire_hypotheses(self, incident_id: str, signature: str, hypotheses: list[Hypothese]) -> None:
