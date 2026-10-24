@@ -59,3 +59,6 @@ class ClientApi:
 
     def decision(self, incident_id: str, decision: str) -> dict:
         return self._appel("post", f"/correctifs/{incident_id}/decision", json={"decision": decision})
+
+    def graphe(self, incident_id: str | None = None) -> dict:
+        return self._appel("get", "/graphe" if incident_id is None else f"/graphe/{incident_id}")

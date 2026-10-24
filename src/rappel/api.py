@@ -514,6 +514,43 @@ def creer_app(
             ajouter_decision(identifiant, etat, f"Résultat Action : {corps.resultat} ; mémoire mise à jour={mise_a_jour}")
         return {"incident_id": identifiant, "resultat": corps.resultat, "memoire_mise_a_jour": mise_a_jour}
 
+    def graphe_complet():
+        from rappel.memoire.graphe_relations import depuis_memoire
+
+        with verrou:
+            connus = []
+            for identifiant, contexte in incidents.items():
+                etat = enquetes.get(identifiant) or {}
+                resultat = etat.get("resultat")
+                enregistrement = getattr(resultat, "enregistrement", None)
+                connus.append({"incident_id": identifiant, "signature": contexte["signature"],
+                               "enregistrement": None if enregistrement is None else enregistrement.model_dump(mode="json")})
+        try:
+            with verrou_execution:
+                courante = memoire_courante()
+                return depuis_memoire(courante, connus), mode_memoire(courante)
+        except Exception:
+            raise HTTPException(500, "Lecture de la mémoire impossible.") from None
+
+    @application.get("/graphe")
+    def lire_graphe():
+        """Graphe de relations (déterministe, sans LLM) : incidents, signatures, hypothèses, causes, correctifs."""
+        from rappel.memoire.graphe_relations import en_mermaid
+
+        graphe, mode = graphe_complet()
+        return {**graphe, "mermaid": en_mermaid(graphe), "memoire_mode": mode}
+
+    @application.get("/graphe/{identifiant}")
+    def lire_graphe_incident(identifiant: str, profondeur: int = Query(default=2, ge=1, le=4)):
+        from rappel.memoire.graphe_relations import en_mermaid, voisinage
+
+        graphe, mode = graphe_complet()
+        noeud = f"incident:{identifiant}"
+        if not any(element["id"] == noeud for element in graphe["noeuds"]):
+            raise HTTPException(404, "Incident absent du graphe de relations.")
+        sous_graphe = voisinage(graphe, noeud, profondeur)
+        return {**sous_graphe, "incident": identifiant, "mermaid": en_mermaid(sous_graphe), "memoire_mode": mode}
+
     @application.get("/boucle/etat")
     def lire_etat_boucle():
         """Dernier cycle de la boucle des 4 agents (journal, lecture seule, sans secret)."""

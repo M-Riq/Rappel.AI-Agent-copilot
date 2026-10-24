@@ -129,8 +129,30 @@ def zone_resultat(client: ClientApi) -> None:
             st.caption(comparaison.get("note", ""))
 
 
+def zone_relations(client: ClientApi) -> None:
+    st.subheader("4. Relations")
+    identifiant = _etat().get("rappel_courant")
+    try:
+        graphe = client.graphe(identifiant)
+    except ErreurApi as erreur:
+        if erreur.statut == 404 and identifiant:
+            graphe = {"noeuds": [], "aretes": [], "mermaid": ""}
+        else:
+            st.caption(logique.MESSAGE_API_COUPEE if erreur.statut is None else str(erreur))
+            return
+    if not graphe.get("noeuds"):
+        st.caption("Aucune relation pour l'instant (mémoire vide).")
+        return
+    if hasattr(st, "graphviz_chart"):
+        st.graphviz_chart(logique.dot_relations(graphe))
+    else:
+        st.code(graphe.get("mermaid", ""), language="mermaid")
+    st.table(logique.tableau_relations(graphe))
+
+
 def afficher(url_api: str) -> None:
     client = ClientApi(url_api)
     zone_pipeline(client)
     zone_fil(client)
     zone_resultat(client)
+    zone_relations(client)

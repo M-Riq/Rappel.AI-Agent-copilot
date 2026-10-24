@@ -170,3 +170,46 @@ def peut_rejouer(nb_rejeux: int, maximum: int = REJEUX_MAX) -> bool:
 
 def identifiant_incident(scenario: str, numero: int) -> str:
     return f"ui-{scenario}-{numero}"
+
+
+# Graphe de relations (GET /graphe) : affichage Graphviz (DOT) ou tableau, sans dépendance.
+COULEURS_NOEUDS = {
+    "incident": "#4c78a8", "signature": "#9d755d", "hypothese_retenue": "#54a24b",
+    "hypothese_refutee": "#e45756", "cause": "#f58518", "correctif": "#b279a2",
+}
+LIBELLES_RELATIONS = {
+    "a_pour_signature": "a pour signature", "meme_signature": "partage la même signature",
+    "retenue_dans": "hypothèse retenue dans", "refutee_dans": "hypothèse réfutée dans",
+    "refutee_pour": "réfutée pour (mémoire)", "cause_confirmee_de": "cause confirmée de",
+    "correctif_essaye_pour": "correctif essayé pour", "resultat_reussi": "résultat réussi",
+    "resultat_echoue": "résultat échoué", "resultat_non_confirme": "résultat non confirmé",
+}
+
+
+def _dot(texte) -> str:
+    return str(texte).replace("\\", "\\\\").replace('"', "'")
+
+
+def dot_relations(graphe: dict) -> str:
+    noeuds = graphe.get("noeuds") or []
+    if not noeuds:
+        return 'digraph relations { vide [label="aucune relation"]; }'
+    alias = {noeud["id"]: f"n{indice}" for indice, noeud in enumerate(noeuds)}
+    lignes = ["digraph relations {", "  rankdir=LR;", '  node [style=filled, fontcolor=white, fontsize=10];']
+    for noeud in noeuds:
+        couleur = COULEURS_NOEUDS.get(noeud.get("type"), "#777777")
+        lignes.append(f'  {alias[noeud["id"]]} [label="{_dot(noeud.get("libelle", ""))}", fillcolor="{couleur}"];')
+    for arete in graphe.get("aretes") or []:
+        if arete["source"] in alias and arete["cible"] in alias:
+            libelle = LIBELLES_RELATIONS.get(arete["type"], arete["type"])
+            lignes.append(f'  {alias[arete["source"]]} -> {alias[arete["cible"]]} [label="{_dot(libelle)}", fontsize=9];')
+    lignes.append("}")
+    return "\n".join(lignes)
+
+
+def tableau_relations(graphe: dict) -> list[dict]:
+    libelles = {noeud["id"]: f'{noeud.get("type")} : {noeud.get("libelle")}' for noeud in graphe.get("noeuds") or []}
+    return [{"source": libelles.get(arete["source"], arete["source"]),
+             "relation": LIBELLES_RELATIONS.get(arete["type"], arete["type"]),
+             "cible": libelles.get(arete["cible"], arete["cible"])}
+            for arete in graphe.get("aretes") or []]
