@@ -22,7 +22,9 @@ réelle (`--confirmer`) avant d'être présentés comme une mesure sponsor.
 - [ ] `python scripts/recette_module_a.py --confirmer` : aucune case ECHOUE, A14 mesurée
 - [ ] `python scripts/recette_globale.py --confirmer` : G1–G4 en réel
 - [ ] `python scripts/collecter_preuves_sponsors.py --confirmer` : preuves réelles par sponsor
+- [ ] `python scripts/pret_reel.py --confirmer` : GO (procédure : `docs/RUNBOOK-BRANCHEMENT.md`)
 - [ ] `python scripts/recette_reelle.py --confirmer` : toutes les étapes réelles en une commande
+- [ ] Rappel : les tests contre `tests/faux_services/` (faux Nightshift, Zetaris, Postgres locaux) ne sont PAS des preuves sponsor
 - [ ] Vidéo 1–4 min enregistrée, sous-titrée, lien public vérifié en navigation privée
 - [ ] Diapositives exportées en PDF
 - [ ] README à jour (bloc « Démarrage rapide » repris de `docs/PROPOSITION-README.md`)

@@ -23,7 +23,21 @@ powershell -ExecutionPolicy Bypass -File scripts\preparer_machine_demo.ps1 -Prep
 Crée `.venv`, installe `requirements-demo.txt` (dont psycopg), copie `.env.example` vers `.env`
 s'il n'existe pas et lance `docker compose up -d postgres` (tables de `sql/init.sql`).
 
-## 3. Renseigner `.env` à la main (jamais dans git)
+## 3. Détecter les services et proposer `.env` (aucun secret affiché)
+
+```powershell
+python scripts\detecter_nightshift.py --fichier-jeton <chemin du proxy-token>
+python scripts\decouvrir_zetaris.py
+python scripts\preparer_env.py --fichier-jeton <chemin du proxy-token> --simuler
+python scripts\preparer_env.py --fichier-jeton <chemin du proxy-token>
+```
+
+`detecter_nightshift.py` sonde `GET /v1/models` (127.0.0.1, localhost, [::1] ; ports 8088, 8090,
+8787, 11434) et classe « en ligne », « non autorisé » ou « hors ligne ». `decouvrir_zetaris.py` lit
+l'OpenAPI publié (endpoint et clé du SQL), teste `SELECT 1 AS one`, les tables et le dialecte.
+`preparer_env.py` n'écrase jamais un `.env` existant sans `--forcer`.
+
+## 3 bis. Ou renseigner `.env` à la main (jamais dans git)
 
 | Service | Variables |
 | --- | --- |
@@ -44,6 +58,18 @@ Avec `--confirmer` : Zetaris `SELECT 1 AS one`, requête sur deux sources
 (`check_meterless.py` : modèles et modèle effectif) et Postgres (`check_postgres.py` : SELECT 1,
 tables, aller-retour annulé). Résultat dans `data/verification_machine.json`. Aucune clé ni mot
 de passe n'est affiché (valeurs masquées).
+
+## 4 bis. Go / no-go
+
+```powershell
+python scripts\pret_reel.py              # lecture seule : machine, Nightshift, voies, Zetaris, Postgres, secrets, tests
+python scripts\pret_reel.py --confirmer  # + un appel facturé par voie (modèle renvoyé contenant « nemotron »)
+```
+
+VERT / ORANGE / ROUGE avec, pour chaque ROUGE, la cause probable et la commande exacte ; code 0
+seulement si tout ce qui est requis est VERT ; rapport `data/pret_reel.json` sans secret. La
+procédure complète (rôles, minutes, dépannage, repli, preuves) est dans
+[RUNBOOK-BRANCHEMENT.md](RUNBOOK-BRANCHEMENT.md).
 
 ## 5. Recette réelle en une commande
 
