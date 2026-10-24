@@ -422,10 +422,15 @@ def creer_app(
             return jsonable_encoder(reponse)
 
     @application.get("/incidents/{identifiant}/enquete/evenements")
-    def lire_fil_enquete(identifiant: str, apres: int = Query(default=0, ge=0)):
+    def lire_fil_enquete(identifiant: str, apres: int = Query(default=0, ge=0),
+                         jusqua: int | None = Query(default=None, ge=0)):
+        """Fil en direct (étapes > apres) ; avec jusqua, rejeu en lecture seule jusqu'à cette étape incluse."""
+        if jusqua is not None and jusqua < apres:
+            raise HTTPException(422, "jusqua doit être supérieur ou égal à apres.")
         with verrou:
             etat = obtenir(identifiant)
-            return [_json_contrat(evenement) for evenement in etat["evenements"] if evenement.etape > apres]
+            return [_json_contrat(evenement) for evenement in etat["evenements"]
+                    if evenement.etape > apres and (jusqua is None or evenement.etape <= jusqua)]
 
     @application.get("/incidents/{identifiant}/evenements")
     def lire_evenements(identifiant: str):

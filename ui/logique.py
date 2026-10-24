@@ -93,6 +93,19 @@ def fusionner(existants: list[dict], nouveaux: list[dict]) -> list[dict]:
     return [par_etape[etape] for etape in sorted(par_etape)]
 
 
+def rejouer_jusqua(evenements: list[dict], etape: int | None) -> list[dict]:
+    """Fil rejoué jusqu'à l'étape donnée (incluse) ; lecture seule, rien n'est recalculé."""
+    if etape is None:
+        return list(evenements)
+    return [evenement for evenement in evenements if _etape(evenement) <= etape]
+
+
+def bornes_curseur(evenements: list[dict]) -> tuple[int, int] | None:
+    """(première, dernière) étape pour le curseur de rejeu, ou None s'il y a moins de deux étapes."""
+    etapes = sorted({int(_etape(evenement)) for evenement in evenements})
+    return (etapes[0], etapes[-1]) if len(etapes) >= 2 else None
+
+
 def enquete_terminee(incident: dict | None) -> bool:
     return isinstance(incident, dict) and incident.get("statut") in ("termine", "erreur")
 

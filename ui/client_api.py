@@ -48,8 +48,9 @@ class ClientApi:
     def lire_incident(self, incident_id: str) -> dict:
         return self._appel("get", f"/incidents/{incident_id}")
 
-    def fil(self, incident_id: str, apres: int = 0) -> list:
-        donnees = self._appel("get", f"/incidents/{incident_id}/enquete/evenements", params={"apres": apres})
+    def fil(self, incident_id: str, apres: int = 0, jusqua: int | None = None) -> list:
+        parametres = {"apres": apres} if jusqua is None else {"apres": apres, "jusqua": jusqua}
+        donnees = self._appel("get", f"/incidents/{incident_id}/enquete/evenements", params=parametres)
         if not isinstance(donnees, list):
             raise ErreurApi("Format d'événements invalide.")
         return [evenement for evenement in donnees if isinstance(evenement, dict)]

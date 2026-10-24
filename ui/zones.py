@@ -92,7 +92,14 @@ def zone_fil(client: ClientApi) -> None:
     mention = logique.mention_simulation(incident)
     if mention:
         st.caption(mention)
-    for evenement in evenements:
+    affiches = evenements
+    bornes = logique.bornes_curseur(evenements)
+    if logique.enquete_terminee(incident) and bornes:
+        # Rejeu en lecture seule : le fil est affiché jusqu'à l'étape choisie, rien n'est recalculé.
+        etape = st.slider("Étape (rejeu)", min_value=bornes[0], max_value=bornes[1], value=bornes[1],
+                          key=f"rappel_etape_{identifiant}")
+        affiches = logique.rejouer_jusqua(evenements, etape)
+    for evenement in affiches:
         afficher_evenement(evenement, bool(incident.get("enquete_simulee")))
     if not logique.enquete_terminee(incident):
         st.caption("Enquête en cours…")
