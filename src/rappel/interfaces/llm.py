@@ -5,6 +5,11 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from rappel.config import Configuration, charger
+from rappel.interfaces import _faux_sql
+
+# Rôles de la boucle d'enquête SQL ; les autres rôles gardent leur comportement.
+ROLES_ENQUETE_RAPIDES = ("hypotheses", "verdict")
+ROLES_ENQUETE_PROFONDS = ("conclusion", "correctif")
 
 
 class MeterlessNonAutorise(RuntimeError):
@@ -37,7 +42,29 @@ def normaliser_url_base(url):
 
 
 class FakeLLM:
+    def modele_pour_role(self, role):
+        if role in ROLES_ENQUETE_RAPIDES:
+            return "faux-rapide"
+        if role in ROLES_ENQUETE_PROFONDS:
+            return "faux-profond"
+        return "fake-deterministe"
+
     def completer(self, prompt, role, tools=None):
+        if role in ROLES_ENQUETE_RAPIDES + ROLES_ENQUETE_PROFONDS:
+            from rappel.enquete.protocoles import lire_donnees
+
+            try:
+                donnees = lire_donnees(prompt)
+            except ValueError:
+                donnees = None
+            # Sans bloc DONNEES du moteur, la simulation historique s'applique.
+            if donnees is not None:
+                return {
+                    "texte": _faux_sql.repondre(role, donnees),
+                    "tool_calls": [],
+                    "modele": self.modele_pour_role(role),
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
         return {
             "texte": f"[Simulation {role}] Vérifier les preuves avant de conclure.",
             "tool_calls": [],
@@ -49,6 +76,7 @@ class FakeLLM:
 class MeterlessLLM:
     def __init__(self, configuration: Configuration | None = None):
         self.configuration = configuration or charger()
+        self.dernier_modele_repondu = None
 
     def entetes(self):
         jeton = self.configuration.meterless_runtime_token
@@ -69,7 +97,10 @@ class MeterlessLLM:
         except requests.RequestException:
             raise RuntimeError("Erreur de communication avec le Runtime Meterless.") from None
         if reponse.status_code in (401, 403):
-            raise MeterlessNonAutorise("jeton Runtime Nightshift incorrect ou non autorisé.")
+            raise MeterlessNonAutorise(
+                "jeton Runtime Nightshift incorrect ou non autorisé "
+                "(ne pas utiliser la clé NVIDIA ; utiliser le jeton Runtime de la Console Nightshift)."
+            )
         try:
             reponse.raise_for_status()
         except requests.HTTPError:
@@ -112,29 +143,36 @@ class MeterlessLLM:
             return {"statut": "erreur", "modeles": [], "message": str(erreur)}
         return {"statut": "ok", "modeles": modeles, "message": "Connexion Runtime Meterless opérationnelle."}
 
-    def completer(self, prompt, role, tools=None):
-        configuration = self.configuration
-        if role in ("detective", "outil"):
-            lane = configuration.meterless_model_rapide
-        elif role in ("sceptique", "conclusion", "correctif"):
-            lane = configuration.meterless_model_profond
+    def modele_pour_role(self, role):
+        if role in ("detective", "outil") + ROLES_ENQUETE_RAPIDES:
+            lane = self.configuration.meterless_model_rapide
+        elif role in ("sceptique",) + ROLES_ENQUETE_PROFONDS:
+            lane = self.configuration.meterless_model_profond
         else:
             lane = ""
-        modele = lane or configuration.meterless_model
+        return lane or self.configuration.meterless_model
+
+    def completer(self, prompt, role, tools=None):
+        configuration = self.configuration
+        modele = self.modele_pour_role(role)
+        self.dernier_modele_repondu = None
         corps = {"model": modele, "messages": [{"role": "user", "content": prompt}]}
         if tools is not None:
             corps["tools"] = tools
         entetes = self.entetes()
+        url = normaliser_url_base(configuration.meterless_base_url) + "/chat/completions"
         try:
             reponse = self._requete(
                 requests.post,
-                normaliser_url_base(configuration.meterless_base_url) + "/chat/completions",
+                url,
                 headers=entetes,
                 json=corps,
                 timeout=180,
             )
             donnees = reponse.json()
             message = donnees["choices"][0]["message"]
+            # Valeur réellement renvoyée par le service, sans repli sur le modèle demandé.
+            self.dernier_modele_repondu = donnees.get("model")
             return {
                 "texte": message.get("content") or "",
                 "tool_calls": message.get("tool_calls") or [],

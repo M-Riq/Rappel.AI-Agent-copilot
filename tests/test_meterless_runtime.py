@@ -4,6 +4,7 @@ import pytest
 import requests
 
 from rappel.config import Configuration
+from rappel.enquete.adaptateurs import LLMEnquete, LLMIndisponible
 from rappel.interfaces import llm
 
 
@@ -120,6 +121,60 @@ def test_chat_texte_retourne_texte_et_modele_effectif(monkeypatch):
     assert parametres["headers"]["meterless-app"] == "rappel"
     assert parametres["headers"]["meterless-scope"] == "user"
     assert parametres["timeout"] == 180
+
+
+def test_url_invalide_est_erreur_configuration(monkeypatch):
+    poster = MagicMock()
+    monkeypatch.setattr(llm.requests, "post", poster)
+    client = llm.MeterlessLLM(
+        Configuration(
+            meterless_base_url="",
+            meterless_runtime_token=JETON_FACTICE,
+        )
+    )
+
+    with pytest.raises(ValueError, match="METERLESS_BASE_URL"):
+        client.completer("bonjour", "detective")
+    poster.assert_not_called()
+
+
+def test_connection_error_est_convertie_par_llm_enquete_sans_secret(monkeypatch):
+    monkeypatch.setattr(
+        llm.requests,
+        "post",
+        MagicMock(side_effect=requests.ConnectionError("Authorization: Bearer " + JETON_FACTICE)),
+    )
+    configuration = Configuration(meterless_runtime_token=JETON_FACTICE)
+    fournisseur = llm.MeterlessLLM(configuration)
+    adaptateur = LLMEnquete(fournisseur, configuration)
+
+    with pytest.raises(LLMIndisponible) as erreur:
+        adaptateur.completer("bonjour", "detective")
+
+    assert isinstance(erreur.value, RuntimeError)
+    assert JETON_FACTICE not in str(erreur.value)
+    assert JETON_FACTICE not in repr(erreur.value)
+
+
+def test_dernier_modele_repondu_est_strictement_le_modele_du_service(monkeypatch):
+    poster = MagicMock(
+        side_effect=[
+            reponse(
+                {
+                    "model": "meterless/fast",
+                    "choices": [{"message": {"content": "première réponse"}}],
+                }
+            ),
+            reponse({"choices": [{"message": {"content": "deuxième réponse"}}]}),
+        ]
+    )
+    monkeypatch.setattr(llm.requests, "post", poster)
+    client = llm.MeterlessLLM(Configuration(meterless_runtime_token=JETON_FACTICE))
+
+    client.completer("premier", "hypotheses")
+    assert client.dernier_modele_repondu == "meterless/fast"
+    client.completer("deuxième", "verdict")
+    assert client.dernier_modele_repondu is None
 
 
 @pytest.mark.parametrize(
