@@ -66,3 +66,9 @@ def test_substituts_ignores():
     assert scan_secrets.trouvailles_ligne('URL = f"postgresql://rappel:{SECRET}@localhost"') == []
     assert scan_secrets.trouvailles_ligne("ZETARIS_API_KEY=jeton-factice-de-test") == []
     assert scan_secrets.trouvailles_ligne("ZETARIS_API_KEY=") == []
+
+
+def test_marqueur_de_masquage_non_signale():
+    # Le marqueur de masquage des rapports n'est pas un secret (faux positif trouvé par pret_reel).
+    assert scan_secrets.est_substitut("[MASQUE]") and scan_secrets.est_substitut('[MASQUE]" in affiche')
+    assert not scan_secrets.est_substitut("vraie-valeur-longue-sans-marqueur")

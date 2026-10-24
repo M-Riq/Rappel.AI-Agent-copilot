@@ -28,11 +28,11 @@ MOTIFS = (
 
 
 def est_substitut(valeur: str) -> bool:
-    """Valeurs de documentation : variable ${...}, gabarit {...} ou <...>, masque ****.
+    """Valeurs de documentation : variable ${...}, gabarit {...} ou <...>, masque **** ou [MASQUE].
 
     Les doubles de test du dépôt portent le mot « factice » : ils ne sont pas des secrets.
     """
-    return (not valeur or valeur[0] in "${<*\\" or "{" in valeur or valeur.startswith("****")
+    return (not valeur or valeur[0] in "${<*\\" or "{" in valeur or valeur.startswith(("****", "[MASQUE]"))
             or len(valeur) < 8 or "factice" in valeur.lower())
 
 
