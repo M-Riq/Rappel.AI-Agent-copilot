@@ -401,7 +401,7 @@ def creer_graphe_sql(
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
-            texte = "; ".join(graphe.decrire_souvenir(souvenir) for souvenir in souvenirs)
+            texte = "; ".join(graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
         emettre(etat, "decision", "systeme", texte)
         return etat
@@ -483,7 +483,7 @@ def creer_graphe_sql(
                 "signature": etat["contexte"].signature,
                 "hypotheses": [resume_hypothese(etat, hypothese) for hypothese in hypotheses],
                 "incident_similaire": bool(etat["souvenirs"]),
-                "souvenirs": [graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]],
+                "souvenirs": [graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"]],
                 "suivis_restants": MAX_REQUETES_SUIVI - suivis_utilises,
             }
             def analyser_verdict(texte):
@@ -676,7 +676,7 @@ def creer_graphe_sql(
         )
         donnees = {"hypothese": hypothese, "contexte": resume, "cause_confirmee": cause,
                    "inclure_conclusion": fusion, "confiance": decision.confiance,
-                   "souvenirs": [graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]]}
+                   "souvenirs": [graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"]]}
         reponse, modele = demander(etat, "correctif", consignes, donnees, analyser_correctif)
         if reponse is None:
             return renoncer(etat, "correctif non obtenu")
@@ -684,7 +684,7 @@ def creer_graphe_sql(
         if not any(identifiant in justification for identifiant in citees):
             justification += f" (requetes SQL : {', '.join(citees)})"
         if etat["souvenirs"]:
-            justification += "; " + "; ".join(graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"])
+            justification += "; " + "; ".join(graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"])
         try:
             correctif = CorrectifPropose(
                 description=reponse.description,

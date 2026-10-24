@@ -147,7 +147,7 @@ def executer_boucle(scenario: str | None = None, *, memoire=None, fabrique_llm=N
     llm = (fabrique_llm or (lambda: creer_llm_enquete(configuration)))()
     try:
         resultat = enqueter(contexte, memoire, llm, AbstentionSeuil(), mode_preuves="sql",
-                            war_room_active=war_room_active)
+                            war_room_active=war_room_active, resultat_confirme=False)
     except Exception:
         suivi.ecrire("enquete", "enquete", "erreur", debut, mode["enquete"], "enquête interrompue (détail masqué)")
         resume["statut"] = "erreur"

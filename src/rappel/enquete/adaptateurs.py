@@ -8,9 +8,10 @@
 
 from contextlib import contextmanager
 import json
+from pathlib import Path
 from threading import Lock
 
-from rappel.config import Configuration, charger
+from rappel.config import RACINE, Configuration, charger
 from rappel.enquete.modeles import EnregistrementMemoire, Hypothese
 from rappel.enquete.protocoles import UsageLLM, usage_par_voie, voie_pour_role
 from rappel.interfaces import llm as llm_squelette
@@ -233,7 +234,9 @@ class MemoireEnquete:
         return [EnregistrementMemoire.model_validate(element) for element in self.backend.lister()]
 
     def vider(self) -> int:
-        return self.backend.vider()
+        nombre = self.backend.vider()
+        self._ecrire_non_confirmes([])
+        return nombre
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         enregistrement = EnregistrementMemoire.model_validate(enregistrement.model_dump())
@@ -242,8 +245,53 @@ class MemoireEnquete:
     def hypotheses_refutees(self, signature: str) -> list[str]:
         return self.backend.hypotheses_refutees(signature)
 
+    # Registre des résultats non confirmés : le contrat n'a que « reussi » / « echoue », un souvenir
+    # écrit avant l'action est donc marqué à part, jusqu'au retour du résultat de l'action.
+    @property
+    def chemin_non_confirmes(self) -> Path:
+        chemin = self.chemin
+        if not isinstance(chemin, Path):
+            chemin = Path(charger().memoire_json_path)
+            chemin = chemin if chemin.is_absolute() else RACINE / chemin
+        return chemin.with_name(chemin.stem + ".non_confirmes.json")
+
+    @staticmethod
+    def _cle(souvenir: EnregistrementMemoire) -> list[str]:
+        return [souvenir.signature, souvenir.correctif_essaye, souvenir.date, souvenir.cause_confirmee]
+
+    def _lire_non_confirmes(self) -> list[list[str]]:
+        try:
+            donnees = json.loads(self.chemin_non_confirmes.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [cle for cle in donnees if isinstance(cle, list)] if isinstance(donnees, list) else []
+
+    def _ecrire_non_confirmes(self, cles: list[list[str]]) -> None:
+        chemin = self.chemin_non_confirmes
+        if not cles and not chemin.exists():
+            return
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(json.dumps(cles, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def marquer_non_confirme(self, enregistrement: EnregistrementMemoire) -> None:
+        cles = self._lire_non_confirmes()
+        cle = self._cle(enregistrement)
+        if cle not in cles:
+            self._ecrire_non_confirmes([*cles, cle])
+
+    def statut_resultat(self, souvenir: EnregistrementMemoire) -> str:
+        """reussi, echoue ou non_confirme (souvenir provisoire en attente du résultat de l'action)."""
+        return "non_confirme" if self._cle(souvenir) in self._lire_non_confirmes() else souvenir.resultat
+
     def mettre_a_jour_resultat(self, signature: str, resultat: str) -> bool:
-        return self.backend.mettre_a_jour_resultat(signature, resultat)
+        souvenirs = self.chercher(signature)
+        mis_a_jour = self.backend.mettre_a_jour_resultat(signature, resultat)
+        if mis_a_jour and souvenirs:
+            cle = self._cle(souvenirs[-1])
+            cles = self._lire_non_confirmes()
+            if cle in cles:
+                self._ecrire_non_confirmes([element for element in cles if element != cle])
+        return mis_a_jour
 
     def ecrire_hypotheses(self, incident_id: str, signature: str, hypotheses: list[Hypothese]) -> None:
         self.backend.ecrire_hypotheses(

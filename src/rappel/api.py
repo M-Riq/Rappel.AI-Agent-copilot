@@ -188,6 +188,8 @@ def creer_app(
                     contexte, memoire_utilisee, llm or creer_llm_enquete(),
                     abstention or AbstentionSeuil(), sur_evenement=recevoir, traceur=suivi,
                     mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
+                    # Le résultat n'est connu qu'après l'action : souvenir marqué non confirmé.
+                    resultat_confirme=False,
                 )
             with verrou:
                 etat = courant()
@@ -403,11 +405,19 @@ def creer_app(
                     }
         if resultat is not None and resultat.correctif is not None:
             # ACTION_REELLE_DEMO=1 : execution sur le pipeline de demo isole uniquement.
-            from rappel.action.executeur import EXECUTE, executer_correctif
+            from rappel.action.executeur import ECHEC_RESTAURE, EXECUTE, executer_correctif
 
             with verrou_execution:
                 action = executer_correctif(correctif, decision.decision)
+                resultat_action = {EXECUTE: "reussi", ECHEC_RESTAURE: "echoue"}.get(action["statut"])
+                if resultat_action is not None and resultat.enregistrement is not None:
+                    try:
+                        memoire_courante().mettre_a_jour_resultat(resultat.enregistrement.signature, resultat_action)
+                    except Exception:
+                        resultat_action = None
             with verrou:
+                if resultat_action is not None:
+                    etat["resultat_action"] = resultat_action
                 ajouter_decision(identifiant, etat, f"Décision humaine : appliquer ; action sur le pipeline de démo : "
                                  f"{action['statut']} ({action['message']})")
             return {
@@ -458,6 +468,9 @@ def creer_app(
             with verrou_execution:
                 courante = memoire_courante()
                 souvenirs = courante.lister() if signature is None else courante.chercher(signature)
+                from rappel.enquete.graphe import statut_souvenir
+
+                statuts = [statut_souvenir(courante, souvenir) for souvenir in souvenirs]
         except Exception:
             raise HTTPException(500, "Lecture de la mémoire impossible.") from None
         refutations = {}
@@ -467,6 +480,8 @@ def creer_app(
         return jsonable_encoder({
             "souvenirs": [souvenir.model_dump(mode="json") for souvenir in souvenirs],
             "refutations_par_signature": refutations,
+            # reussi, echoue ou non_confirme (souvenir provisoire, action non encore confirmée).
+            "statuts_resultat": statuts,
         })
 
     @application.post("/memoire/reinitialiser")

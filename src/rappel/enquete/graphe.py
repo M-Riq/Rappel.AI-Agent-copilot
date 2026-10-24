@@ -104,10 +104,27 @@ def preparer(etat: EtatEnquete) -> EtatEnquete:
     return {**etat, "evenements": list(etat.get("evenements", []))}
 
 
-def decrire_souvenir(souvenir: EnregistrementMemoire) -> str:
-    if souvenir.resultat == "reussi":
+def statut_souvenir(memoire, souvenir: EnregistrementMemoire) -> str:
+    """reussi, echoue ou non_confirme (registre de la mémoire, sinon résultat enregistré)."""
+    lire = getattr(memoire, "statut_resultat", None)
+    if callable(lire):
+        try:
+            statut = lire(souvenir)
+        except Exception:
+            statut = None
+        if statut in ("reussi", "echoue", "non_confirme"):
+            return statut
+    return souvenir.resultat
+
+
+def decrire_souvenir(souvenir: EnregistrementMemoire, statut: str | None = None) -> str:
+    # « résolu par » seulement si le résultat enregistré est réussi ET confirmé.
+    statut = statut or souvenir.resultat
+    if statut == "reussi":
         return f"incident similaire résolu par : {souvenir.correctif_essaye} (date : {souvenir.date})"
-    return f"échec du correctif déjà essayé : {souvenir.correctif_essaye} (date : {souvenir.date})"
+    if statut == "echoue":
+        return f"échec du correctif déjà essayé (échoué) : {souvenir.correctif_essaye} (date : {souvenir.date})"
+    return f"incident similaire, essayé : {souvenir.correctif_essaye} (résultat non confirmé) (date : {souvenir.date})"
 
 
 def extraire_json(texte: str) -> str:
@@ -176,7 +193,7 @@ def creer_graphe(
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
-            texte = "; ".join(decrire_souvenir(souvenir) for souvenir in souvenirs)
+            texte = "; ".join(decrire_souvenir(souvenir, statut_souvenir(memoire, souvenir)) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
         emettre(etat, "preuve", "historien", texte)
         return etat
@@ -314,7 +331,7 @@ def creer_graphe(
             justification = f"{retenue.texte}: {'; '.join(retenue.preuves)}"
         if etat["souvenirs"]:
             justification += "; " + "; ".join(
-                decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]
+                decrire_souvenir(souvenir, statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"]
             )
         correctif = CorrectifPropose(
             description=description, patch=patch, niveau_risque="validation", reversible=True,
@@ -377,6 +394,7 @@ def enqueter(
     max_tours: int | None = None,
     fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
     appel_outils: bool | None = None,
+    resultat_confirme: bool = True,
 ) -> ResultatEnquete:
     # Resultat provisoire jusqu'a l'integration avec le module Action.
     if resultat not in {"reussi", "echoue"}:
@@ -436,6 +454,10 @@ def enqueter(
             if run_sql is None and callable(fermer_backend):
                 # Backend cree pour cette enquete : on le libere ; un backend injecte reste ouvert.
                 fermer_backend()
+        marquer = getattr(memoire, "marquer_non_confirme", None)
+        if not resultat_confirme and etat["enregistrement"] is not None and callable(marquer):
+            # Souvenir provisoire : l'action n'a pas encore confirmé le résultat.
+            marquer(etat["enregistrement"])
         ecrire_hypotheses = getattr(memoire, "ecrire_hypotheses", None)
         if callable(ecrire_hypotheses) and etat["hypotheses"]:
             contexte_valide = etat["contexte"]
