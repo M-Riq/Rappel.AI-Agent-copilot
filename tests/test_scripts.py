@@ -28,21 +28,15 @@ def test_meterless_catalogue_et_completion(monkeypatch, capsys, modele, avertiss
     configuration = Configuration()
     monkeypatch.setattr(script, "charger", lambda: configuration)
     llm = Mock()
-    llm.entetes.return_value = {"Authorization": "******"}
+    llm.tester_connexion.return_value = {
+        "statut": "ok", "modeles": ["modele-catalogue"], "message": "Connexion OK."
+    }
     llm.completer.return_value = {"texte": "Opérationnel", "modele": modele}
     constructeur = Mock(return_value=llm)
     monkeypatch.setattr(script, "MeterlessLLM", constructeur)
-    reponse = Mock()
-    reponse.json.return_value = {"data": [{"id": "modele-catalogue"}]}
-    obtenir = Mock(return_value=reponse)
-    monkeypatch.setattr(script.requests, "get", obtenir)
     assert script.main() == 0
     constructeur.assert_called_once_with(configuration)
-    obtenir.assert_called_once_with(
-        f"{configuration.meterless_base_url}/models",
-        headers=llm.entetes.return_value,
-        timeout=5,
-    )
+    llm.tester_connexion.assert_called_once_with()
     assert llm.completer.call_args.args[0].startswith("Réponds")
     assert llm.completer.call_args.args[1] == "detective"
     sortie = capsys.readouterr().out

@@ -87,7 +87,7 @@ def test_meterless_entetes_lanes(monkeypatch, role, modele):
     }
     assert params["json"]["model"] == modele
     assert params["json"]["tools"] == [RUN_SQL_TOOL]
-    assert params["timeout"] == 60
+    assert params["timeout"] == 180
     assert resultat == {
         "texte": "", "tool_calls": [{"id": "outil-1"}],
         "modele": "nemotron-effectif", "usage": {"total_tokens": 12},
