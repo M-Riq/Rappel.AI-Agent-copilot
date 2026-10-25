@@ -78,16 +78,9 @@ def _fixture(nom):
 
 def mode_memoire(memoire):
     """json, postgres ou fallback-json selon le backend effectivement utilise."""
-    from rappel.interfaces.memoire import MemoireJSON, MemoirePostgres
+    from rappel.interfaces.memoire import mode_memoire as calculer
 
-    backend = getattr(memoire, "backend", memoire)
-    if getattr(backend, "mode", None):
-        return backend.mode
-    if isinstance(backend, MemoireJSON):
-        return "json"
-    if isinstance(backend, MemoirePostgres):
-        return "postgres"
-    return type(backend).__name__
+    return calculer(memoire)
 
 
 def _json_contrat(objet):
@@ -188,6 +181,8 @@ def creer_app(
                     contexte, memoire_utilisee, llm or creer_llm_enquete(),
                     abstention or AbstentionSeuil(), sur_evenement=recevoir, traceur=suivi,
                     mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
+                    # Le résultat n'est connu qu'après l'action : souvenir marqué non confirmé.
+                    resultat_confirme=False,
                 )
             with verrou:
                 etat = courant()
@@ -286,8 +281,67 @@ def creer_app(
                     break
             return resumes
 
+    def comparer_war_room(identifiant: str, confirmer: bool):
+        """Même incident rejoué sans puis avec war room, chacun sur une mémoire vide temporaire."""
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from rappel.enquete import enqueter
+        from rappel.enquete.adaptateurs import MemoireEnquete, creer_llm_enquete
+        from rappel.interfaces.abstention import AbstentionSeuil
+
+        configuration = charger()
+        with verrou:
+            contexte = incidents.get(identifiant)
+        if contexte is None:
+            raise HTTPException(404, f"Incident inconnu : {identifiant}.")
+        if configuration.llm_provider != "fake" and not confirmer:
+            raise HTTPException(409, "Rejeu avec un LLM réel : ajouter confirmer=true (deux enquêtes, appels facturés).")
+
+        def mesurer(war_room_active):
+            with TemporaryDirectory() as dossier:
+                resultat = enqueter(
+                    contexte, MemoireEnquete.json(Path(dossier) / "memoire.json"), llm or creer_llm_enquete(),
+                    abstention or AbstentionSeuil(), mode_preuves=mode_preuves, fabrique_run_sql=fabrique_run_sql,
+                    war_room_active=war_room_active,
+                )
+            metriques = resultat.metriques
+            retenue = next((h for h in resultat.hypotheses if h.statut == "retenue"), None)
+            return {
+                "war_room_active": war_room_active, "nb_appels_llm": metriques.nb_appels_llm,
+                "nb_evenements": metriques.nb_evenements, "nb_tours_war_room": metriques.nb_tours_war_room,
+                "nb_appels_llm_war_room": metriques.nb_appels_llm_war_room, "nb_objections": metriques.nb_objections,
+                "nb_objections_sans_reponse": metriques.nb_objections_sans_reponse,
+                "confiance_hypothese": None if retenue is None else retenue.confiance,
+                "confiance_decision": resultat.decision_abstention.confiance,
+                "abstention": resultat.decision_abstention.abstient,
+                "preuves_citees": [] if retenue is None else list(retenue.preuves),
+            }
+
+        try:
+            with verrou_execution:
+                sans, avec = mesurer(False), mesurer(True)
+        except Exception:
+            raise HTTPException(500, "Rejeu impossible ; aucun détail sensible exposé.") from None
+        simulation = configuration.llm_provider == "fake"
+        return {
+            "mode": "war_room", "incident": identifiant, "sans": sans, "avec": avec,
+            "confiance_avant": sans["confiance_hypothese"], "confiance_apres": avec["confiance_hypothese"],
+            "difference": {"appels_llm": avec["nb_appels_llm"] - sans["nb_appels_llm"],
+                           "evenements": avec["nb_evenements"] - sans["nb_evenements"]},
+            "preuves_inchangees": sans["preuves_citees"] == avec["preuves_citees"],
+            "simulation": simulation,
+            "note": ("simulé : LLM fake, le débat est scripté et ne mesure pas un vrai modèle" if simulation
+                     else "rejeu réel : deux enquêtes sur une mémoire vide temporaire"),
+        }
+
     @application.get("/comparaison")
-    def comparer(a: str, b: str):
+    def comparer(a: str, b: str | None = None, mode: Literal["incidents", "war_room"] = "incidents",
+                 confirmer: bool = False):
+        if mode == "war_room":
+            return comparer_war_room(a, confirmer)
+        if b is None:
+            raise HTTPException(422, "Paramètre b requis pour comparer deux incidents.")
         with verrou:
             resultats = {}
             for identifiant in (a, b):
@@ -361,10 +415,15 @@ def creer_app(
             return jsonable_encoder(reponse)
 
     @application.get("/incidents/{identifiant}/enquete/evenements")
-    def lire_fil_enquete(identifiant: str, apres: int = Query(default=0, ge=0)):
+    def lire_fil_enquete(identifiant: str, apres: int = Query(default=0, ge=0),
+                         jusqua: int | None = Query(default=None, ge=0)):
+        """Fil en direct (étapes > apres) ; avec jusqua, rejeu en lecture seule jusqu'à cette étape incluse."""
+        if jusqua is not None and jusqua < apres:
+            raise HTTPException(422, "jusqua doit être supérieur ou égal à apres.")
         with verrou:
             etat = obtenir(identifiant)
-            return [_json_contrat(evenement) for evenement in etat["evenements"] if evenement.etape > apres]
+            return [_json_contrat(evenement) for evenement in etat["evenements"]
+                    if evenement.etape > apres and (jusqua is None or evenement.etape <= jusqua)]
 
     @application.get("/incidents/{identifiant}/evenements")
     def lire_evenements(identifiant: str):
@@ -403,11 +462,19 @@ def creer_app(
                     }
         if resultat is not None and resultat.correctif is not None:
             # ACTION_REELLE_DEMO=1 : execution sur le pipeline de demo isole uniquement.
-            from rappel.action.executeur import EXECUTE, executer_correctif
+            from rappel.action.executeur import ECHEC_RESTAURE, EXECUTE, executer_correctif
 
             with verrou_execution:
                 action = executer_correctif(correctif, decision.decision)
+                resultat_action = {EXECUTE: "reussi", ECHEC_RESTAURE: "echoue"}.get(action["statut"])
+                if resultat_action is not None and resultat.enregistrement is not None:
+                    try:
+                        memoire_courante().mettre_a_jour_resultat(resultat.enregistrement.signature, resultat_action)
+                    except Exception:
+                        resultat_action = None
             with verrou:
+                if resultat_action is not None:
+                    etat["resultat_action"] = resultat_action
                 ajouter_decision(identifiant, etat, f"Décision humaine : appliquer ; action sur le pipeline de démo : "
                                  f"{action['statut']} ({action['message']})")
             return {
@@ -445,12 +512,59 @@ def creer_app(
             ajouter_decision(identifiant, etat, f"Résultat Action : {corps.resultat} ; mémoire mise à jour={mise_a_jour}")
         return {"incident_id": identifiant, "resultat": corps.resultat, "memoire_mise_a_jour": mise_a_jour}
 
+    def graphe_complet():
+        from rappel.memoire.graphe_relations import depuis_memoire
+
+        with verrou:
+            connus = []
+            for identifiant, contexte in incidents.items():
+                etat = enquetes.get(identifiant) or {}
+                resultat = etat.get("resultat")
+                enregistrement = getattr(resultat, "enregistrement", None)
+                connus.append({"incident_id": identifiant, "signature": contexte["signature"],
+                               "enregistrement": None if enregistrement is None else enregistrement.model_dump(mode="json")})
+        try:
+            with verrou_execution:
+                courante = memoire_courante()
+                return depuis_memoire(courante, connus), mode_memoire(courante)
+        except Exception:
+            raise HTTPException(500, "Lecture de la mémoire impossible.") from None
+
+    @application.get("/graphe")
+    def lire_graphe():
+        """Graphe de relations (déterministe, sans LLM) : incidents, signatures, hypothèses, causes, correctifs."""
+        from rappel.memoire.graphe_relations import en_mermaid
+
+        graphe, mode = graphe_complet()
+        return {**graphe, "mermaid": en_mermaid(graphe), "memoire_mode": mode}
+
+    @application.get("/graphe/{identifiant}")
+    def lire_graphe_incident(identifiant: str, profondeur: int = Query(default=2, ge=1, le=4)):
+        from rappel.memoire.graphe_relations import en_mermaid, voisinage
+
+        graphe, mode = graphe_complet()
+        noeud = f"incident:{identifiant}"
+        if not any(element["id"] == noeud for element in graphe["noeuds"]):
+            raise HTTPException(404, "Incident absent du graphe de relations.")
+        sous_graphe = voisinage(graphe, noeud, profondeur)
+        return {**sous_graphe, "incident": identifiant, "mermaid": en_mermaid(sous_graphe), "memoire_mode": mode}
+
+    @application.get("/boucle/etat")
+    def lire_etat_boucle():
+        """Dernier cycle de la boucle des 4 agents (journal, lecture seule, sans secret)."""
+        from rappel.orchestration.boucle import lire_dernier_cycle
+
+        return lire_dernier_cycle()
+
     @application.get("/memoire")
     def lire_memoire(signature: str | None = None):
         try:
             with verrou_execution:
                 courante = memoire_courante()
                 souvenirs = courante.lister() if signature is None else courante.chercher(signature)
+                from rappel.enquete.graphe import statut_souvenir
+
+                statuts = [statut_souvenir(courante, souvenir) for souvenir in souvenirs]
         except Exception:
             raise HTTPException(500, "Lecture de la mémoire impossible.") from None
         refutations = {}
@@ -460,6 +574,8 @@ def creer_app(
         return jsonable_encoder({
             "souvenirs": [souvenir.model_dump(mode="json") for souvenir in souvenirs],
             "refutations_par_signature": refutations,
+            # reussi, echoue ou non_confirme (souvenir provisoire, action non encore confirmée).
+            "statuts_resultat": statuts,
         })
 
     @application.post("/memoire/reinitialiser")

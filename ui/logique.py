@@ -23,6 +23,31 @@ def style_evenement(evenement: dict) -> tuple[str, str]:
     return STYLES_EVENEMENT.get(type_evenement, ("info", type_evenement.capitalize() or "Information"))
 
 
+# Rôles de la war room (src/rappel/enquete/war_room.py) : le code arbitre, jamais le modèle.
+ROLES_DEBAT = {
+    "detective": "détective",
+    "sceptique": "avocat du diable (sceptique)",
+    "historien": "historien (mémoire)",
+    "systeme": "arbitre (code)",
+}
+DEBUTS_ARBITRAGE = ("Objection du tour ", "War room terminee", "JSON invalide du ")
+
+
+def role_debat(evenement: dict) -> str | None:
+    """Rôle si l'événement appartient au débat de la war room, sinon None."""
+    acteur = str(evenement.get("acteur", ""))
+    if str(evenement.get("type", "")) == "debat":
+        return ROLES_DEBAT.get(acteur, acteur or "inconnu")
+    if acteur == "systeme" and str(evenement.get("texte", "")).startswith(DEBUTS_ARBITRAGE):
+        return ROLES_DEBAT["systeme"]
+    return None
+
+
+def etiquette_debat(evenement: dict) -> str | None:
+    role = role_debat(evenement)
+    return None if role is None else f"Débat · {role}"
+
+
 def badge_modele(evenement: dict, simulation: bool) -> str | None:
     """Badge honnête : jamais « Nemotron » pour un modèle simulé ou un autre modèle."""
     modele = str(evenement.get("modele") or "").strip()
@@ -43,8 +68,15 @@ def sql_a_afficher(evenement: dict) -> str | None:
     return None
 
 
+LONGUEUR_MAX_TEXTE = 5000
+
+
 def texte_evenement(evenement: dict) -> str:
-    return str(evenement.get("texte", evenement.get("message", evenement.get("contenu", ""))))
+    """Texte affiché d'un événement, borné pour qu'un texte géant ne fige pas l'interface."""
+    texte = str(evenement.get("texte", evenement.get("message", evenement.get("contenu", ""))))
+    if len(texte) > LONGUEUR_MAX_TEXTE:
+        return texte[:LONGUEUR_MAX_TEXTE] + f"… [{len(texte) - LONGUEUR_MAX_TEXTE} caractères masqués]"
+    return texte
 
 
 def _etape(evenement: dict) -> float:
@@ -66,6 +98,19 @@ def fusionner(existants: list[dict], nouveaux: list[dict]) -> list[dict]:
         if isinstance(evenement, dict):
             par_etape.setdefault(_etape(evenement), evenement)
     return [par_etape[etape] for etape in sorted(par_etape)]
+
+
+def rejouer_jusqua(evenements: list[dict], etape: int | None) -> list[dict]:
+    """Fil rejoué jusqu'à l'étape donnée (incluse) ; lecture seule, rien n'est recalculé."""
+    if etape is None:
+        return list(evenements)
+    return [evenement for evenement in evenements if _etape(evenement) <= etape]
+
+
+def bornes_curseur(evenements: list[dict]) -> tuple[int, int] | None:
+    """(première, dernière) étape pour le curseur de rejeu, ou None s'il y a moins de deux étapes."""
+    etapes = sorted({int(_etape(evenement)) for evenement in evenements})
+    return (etapes[0], etapes[-1]) if len(etapes) >= 2 else None
 
 
 def enquete_terminee(incident: dict | None) -> bool:
@@ -145,3 +190,46 @@ def peut_rejouer(nb_rejeux: int, maximum: int = REJEUX_MAX) -> bool:
 
 def identifiant_incident(scenario: str, numero: int) -> str:
     return f"ui-{scenario}-{numero}"
+
+
+# Graphe de relations (GET /graphe) : affichage Graphviz (DOT) ou tableau, sans dépendance.
+COULEURS_NOEUDS = {
+    "incident": "#4c78a8", "signature": "#9d755d", "hypothese_retenue": "#54a24b",
+    "hypothese_refutee": "#e45756", "cause": "#f58518", "correctif": "#b279a2",
+}
+LIBELLES_RELATIONS = {
+    "a_pour_signature": "a pour signature", "meme_signature": "partage la même signature",
+    "retenue_dans": "hypothèse retenue dans", "refutee_dans": "hypothèse réfutée dans",
+    "refutee_pour": "réfutée pour (mémoire)", "cause_confirmee_de": "cause confirmée de",
+    "correctif_essaye_pour": "correctif essayé pour", "resultat_reussi": "résultat réussi",
+    "resultat_echoue": "résultat échoué", "resultat_non_confirme": "résultat non confirmé",
+}
+
+
+def _dot(texte) -> str:
+    return str(texte).replace("\\", "\\\\").replace('"', "'")
+
+
+def dot_relations(graphe: dict) -> str:
+    noeuds = graphe.get("noeuds") or []
+    if not noeuds:
+        return 'digraph relations { vide [label="aucune relation"]; }'
+    alias = {noeud["id"]: f"n{indice}" for indice, noeud in enumerate(noeuds)}
+    lignes = ["digraph relations {", "  rankdir=LR;", '  node [style=filled, fontcolor=white, fontsize=10];']
+    for noeud in noeuds:
+        couleur = COULEURS_NOEUDS.get(noeud.get("type"), "#777777")
+        lignes.append(f'  {alias[noeud["id"]]} [label="{_dot(noeud.get("libelle", ""))}", fillcolor="{couleur}"];')
+    for arete in graphe.get("aretes") or []:
+        if arete["source"] in alias and arete["cible"] in alias:
+            libelle = LIBELLES_RELATIONS.get(arete["type"], arete["type"])
+            lignes.append(f'  {alias[arete["source"]]} -> {alias[arete["cible"]]} [label="{_dot(libelle)}", fontsize=9];')
+    lignes.append("}")
+    return "\n".join(lignes)
+
+
+def tableau_relations(graphe: dict) -> list[dict]:
+    libelles = {noeud["id"]: f'{noeud.get("type")} : {noeud.get("libelle")}' for noeud in graphe.get("noeuds") or []}
+    return [{"source": libelles.get(arete["source"], arete["source"]),
+             "relation": LIBELLES_RELATIONS.get(arete["type"], arete["type"]),
+             "cible": libelles.get(arete["cible"], arete["cible"])}
+            for arete in graphe.get("aretes") or []]

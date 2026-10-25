@@ -5,11 +5,13 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests
 import streamlit as st
 
 from rappel.config import RACINE, charger
+import logique
 
 
 def _evenements(donnees):
@@ -55,6 +57,9 @@ def afficher_evenement(evenement):
         f"Étape {evenement.get('etape', '?')} · "
         f"{evenement.get('horodatage', '')} · {type_evenement}"
     )
+    etiquette = logique.etiquette_debat(evenement)
+    if etiquette:
+        st.caption(etiquette)
     texte = str(
         evenement.get("texte", evenement.get("message", evenement.get("contenu", "")))
     )

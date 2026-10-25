@@ -16,6 +16,17 @@ def environnement_local(monkeypatch, tmp_path):
     monkeypatch.setenv("MEMOIRE_JSON_PATH", str(tmp_path / "memoire.json"))
     # Pipeline de demo isole : jamais data/pipeline_demo du depot pendant les tests.
     monkeypatch.setenv("PIPELINE_DEMO_DIR", str(tmp_path / "pipeline_demo"))
+    # Journal de la boucle des 4 agents : jamais data/ du depot pendant les tests.
+    monkeypatch.setenv("BOUCLE_JOURNAL_PATH", str(tmp_path / "boucle_journal.jsonl"))
+    # Relances réseau sans attente pendant les tests (la politique reste la même).
+    monkeypatch.setenv("RESEAU_ATTENTE_BASE_S", "0")
+    for nom in ("ACTION_REELLE_DEMO", "WAR_ROOM_ACTIVE"):
+        monkeypatch.delenv(nom, raising=False)
+
+    # Budget d'appels facturés : remis à zéro à chaque test (il est global au processus).
+    from rappel.enquete.adaptateurs import reinitialiser_budget_session
+
+    reinitialiser_budget_session()
 
     def interdire_reseau(*args, **kwargs):
         raise AssertionError("Appel réseau interdit dans les tests.")

@@ -2,12 +2,25 @@ import os
 
 from rappel.config import charger
 
+ETIQUETTE_FAUX_SERVICES = "FAUX SERVICE LOCAL, NON une preuve sponsor"
+
+
+def faux_services_actifs() -> bool:
+    """Vrai quand les variables pointent vers les faux services locaux des tests (RAPPEL_FAUX_SERVICES=1)."""
+    return os.environ.get("RAPPEL_FAUX_SERVICES", "").strip() == "1"
+
+
+def annoncer_faux_services() -> bool:
+    if faux_services_actifs():
+        print(ETIQUETTE_FAUX_SERVICES + " : aucun résultat ci-dessous ne prouve l'usage d'un sponsor.")
+        return True
+    return False
+from rappel.securite import masquer_secrets
+
 
 def nettoyer(texte: str) -> str:
-    for nom, valeur in os.environ.items():
-        if valeur and any(mot in nom.upper() for mot in ("KEY", "SECRET", "TOKEN", "PASSWORD")):
-            texte = texte.replace(valeur, "[MASQUE]")
-    return texte
+    # Valeurs sensibles de l'environnement, identifiants dans les URL et jetons « Bearer ».
+    return masquer_secrets(texte)
 
 
 def afficher(texte: str) -> None:
@@ -54,3 +67,18 @@ class LLMCapture:
         if self.brut:
             afficher(f"Brut ({role}, 400 caracteres max) : {nettoyer(reponse)[:400]}")
         return reponse
+
+def ecrire_rapport(chemin, texte: str) -> None:
+    """Rapport écrit de façon atomique : un Ctrl+C ne laisse jamais de fichier tronqué."""
+    from rappel.securite import ecrire_texte_atomique
+
+    ecrire_texte_atomique(chemin, texte)
+
+
+def executer_main(main) -> int:
+    """Code de sortie de main ; Ctrl+C donne un arrêt propre (code 130) sans trace ni fichier partiel."""
+    try:
+        return main()
+    except KeyboardInterrupt:
+        print("Interrompu (Ctrl+C) : arrêt propre, aucun rapport partiel écrit.")
+        return 130

@@ -27,6 +27,9 @@ def _etat():
 def afficher_evenement(evenement: dict, simulation: bool) -> None:
     gravite, libelle = logique.style_evenement(evenement)
     st.caption(f"Étape {evenement.get('etape', '?')} · {libelle} · {evenement.get('acteur', '')}")
+    etiquette = logique.etiquette_debat(evenement)
+    if etiquette:
+        st.caption(etiquette)
     getattr(st, AFFICHEURS[gravite])(logique.texte_evenement(evenement))
     badge = logique.badge_modele(evenement, simulation)
     if badge:
@@ -89,7 +92,14 @@ def zone_fil(client: ClientApi) -> None:
     mention = logique.mention_simulation(incident)
     if mention:
         st.caption(mention)
-    for evenement in evenements:
+    affiches = evenements
+    bornes = logique.bornes_curseur(evenements)
+    if logique.enquete_terminee(incident) and bornes:
+        # Rejeu en lecture seule : le fil est affiché jusqu'à l'étape choisie, rien n'est recalculé.
+        etape = st.slider("Étape (rejeu)", min_value=bornes[0], max_value=bornes[1], value=bornes[1],
+                          key=f"rappel_etape_{identifiant}")
+        affiches = logique.rejouer_jusqua(evenements, etape)
+    for evenement in affiches:
         afficher_evenement(evenement, bool(incident.get("enquete_simulee")))
     if not logique.enquete_terminee(incident):
         st.caption("Enquête en cours…")
@@ -126,8 +136,30 @@ def zone_resultat(client: ClientApi) -> None:
             st.caption(comparaison.get("note", ""))
 
 
+def zone_relations(client: ClientApi) -> None:
+    st.subheader("4. Relations")
+    identifiant = _etat().get("rappel_courant")
+    try:
+        graphe = client.graphe(identifiant)
+    except ErreurApi as erreur:
+        if erreur.statut == 404 and identifiant:
+            graphe = {"noeuds": [], "aretes": [], "mermaid": ""}
+        else:
+            st.caption(logique.MESSAGE_API_COUPEE if erreur.statut is None else str(erreur))
+            return
+    if not graphe.get("noeuds"):
+        st.caption("Aucune relation pour l'instant (mémoire vide).")
+        return
+    if hasattr(st, "graphviz_chart"):
+        st.graphviz_chart(logique.dot_relations(graphe))
+    else:
+        st.code(graphe.get("mermaid", ""), language="mermaid")
+    st.table(logique.tableau_relations(graphe))
+
+
 def afficher(url_api: str) -> None:
     client = ClientApi(url_api)
     zone_pipeline(client)
     zone_fil(client)
     zone_resultat(client)
+    zone_relations(client)

@@ -46,11 +46,15 @@ correctif de fixture comme avant ; **409** si l'enquête est en cours ou sans co
 | --- | --- | --- |
 | GET | `/incidents` | Résumés récents (`limite` 1-200, défaut 50 ; filtre `statut` : `en_cours`, `termine`, `erreur`) |
 | GET | `/incidents/{id}` | Statut et résultat de l'enquête |
-| GET | `/incidents/{id}/enquete/evenements?apres=N` | Fil en direct de l'enquête (étapes > N), tous modes |
+| GET | `/incidents/{id}/enquete/evenements?apres=N&jusqua=M` | Fil en direct de l'enquête (étapes > N) ; avec `jusqua`, rejeu en lecture seule jusqu'à l'étape M incluse (**422** si M < N) |
 | POST | `/incidents/depuis-demo` | Option : contexte construit depuis l'état courant du pipeline de démo (`{"incident_id"?}`) -> **201** `{id, source: "pipeline_demo", simulation: true, signature, statut_pipeline, reducteur_logs}` ; **409** si le pipeline de démo est absent ou l'identifiant déjà pris |
 | GET | `/comparaison?a=<id>&b=<id>` | Métriques de deux enquêtes terminées, réductions et règle des 60 % |
+| GET | `/comparaison?a=<id>&mode=war_room` | Même incident rejoué sans puis avec war room (mémoire vide temporaire) |
+| GET | `/boucle/etat` | Dernier cycle de la boucle des 4 agents (journal : agents, statuts, durées, modes) |
+| GET | `/graphe` | Graphe de relations des incidents (`noeuds`, `aretes`, `mermaid`, `memoire_mode`) |
+| GET | `/graphe/{id}?profondeur=2` | Voisinage de l'incident dans le graphe (**404** si absent) |
 | POST | `/incidents/{id}/resultat-action` | `{"resultat": "reussi" \| "echoue"}` -> met à jour le dernier souvenir de la signature (**202**) |
-| GET | `/memoire?signature=...` | Souvenirs et réfutations par signature (textes potentiellement sensibles) |
+| GET | `/memoire?signature=...` | Souvenirs, réfutations par signature et `statuts_resultat` (`reussi`, `echoue`, `non_confirme`) |
 | POST | `/memoire/reinitialiser` | `{"confirmer": true, "incidents": false}` ; `confirmer` strictement booléen et vrai, sinon **422** ; **409** si une enquête est en cours |
 
 `GET /incidents/{id}` (enquête terminée) :
@@ -106,8 +110,40 @@ Compare deux enquêtes terminées (typiquement P1 puis P2 de même signature) :
 - **404** si un incident est inconnu, **409** si l'une des enquêtes n'est pas terminée,
   **422** si `a` ou `b` manque.
 
+## GET /comparaison?a=<id>&mode=war_room
+
+Rejoue le contexte de l'incident `a` deux fois (war room désactivée puis activée), chacune sur une
+mémoire JSON temporaire vide : la mémoire de l'application n'est pas modifiée. Réponse :
+`sans` et `avec` (`nb_appels_llm`, `nb_evenements`, `nb_tours_war_room`, `nb_appels_llm_war_room`,
+`nb_objections`, `confiance_hypothese`, `confiance_decision`, `preuves_citees`),
+`confiance_avant`, `confiance_apres`, `difference`, `preuves_inchangees`, `simulation` et une
+`note` (« simulé : … » en mode fake). Avec un LLM réel, `confirmer=true` est exigé (**409**
+sinon : deux enquêtes facturées). **404** si l'incident est inconnu.
+
+## Résultat confirmé avant « résolu par »
+
+L'enquête lancée par l'API écrit un souvenir **non confirmé** (le contrat n'a que `reussi` /
+`echoue` : l'état non confirmé est tenu dans `<memoire>.non_confirmes.json`). Le libellé
+« incident similaire résolu par » n'apparaît que pour un résultat `reussi` confirmé ; sinon
+« essayé : … (résultat non confirmé) » ou « échec du correctif déjà essayé (échoué) ». La
+confirmation vient de `POST /incidents/{id}/resultat-action` ou d'une décision « appliquer »
+exécutée (`ACTION_REELLE_DEMO=1`), qui écrit `reussi` ou `echoue` dans la mémoire.
+
+## GET /boucle/etat et GET /graphe
+
+- `/boucle/etat` lit le journal `BOUCLE_JOURNAL_PATH` (défaut `data/boucle_journal.jsonl`) écrit
+  par `scripts/boucle_agents.py` : `{statut, cycle, debut, fin, agents: [{agent, etape, statut,
+  duree_ms, mode}], modes, simulation}` ou `{"statut": "aucun_cycle"}`. Le journal n'est pas un
+  événement du contrat et ne contient ni texte du modèle ni secret.
+- `/graphe` est déterministe et sans LLM : nœuds `incident`, `signature`, `hypothese_retenue`,
+  `hypothese_refutee`, `cause`, `correctif` ; arêtes `a_pour_signature`, `meme_signature`,
+  `retenue_dans`, `refutee_dans`, `refutee_pour` (hypothèse écartée grâce à la mémoire),
+  `cause_confirmee_de`, `correctif_essaye_pour`, `resultat_reussi|echoue|non_confirme`. Il
+  fonctionne avec la mémoire JSON, Postgres et le secours automatique.
+
 ## Limites
 
 - Pas d'authentification, pas de persistance des incidents, un seul worker recommandé.
 - Meterless Nightshift, Zetaris et Postgres ne sont pas testés en réel par la suite de tests.
-- L'API n'exécute aucun patch ; le résultat Action est déclaratif.
+- L'API n'exécute un correctif que sur le pipeline de démo isolé et seulement si
+  `ACTION_REELLE_DEMO=1` ; sinon le résultat Action est déclaratif.

@@ -22,6 +22,9 @@ réelle (`--confirmer`) avant d'être présentés comme une mesure sponsor.
 - [ ] `python scripts/recette_module_a.py --confirmer` : aucune case ECHOUE, A14 mesurée
 - [ ] `python scripts/recette_globale.py --confirmer` : G1–G4 en réel
 - [ ] `python scripts/collecter_preuves_sponsors.py --confirmer` : preuves réelles par sponsor
+- [ ] `python scripts/pret_reel.py --confirmer` : GO (procédure : `docs/RUNBOOK-BRANCHEMENT.md`)
+- [ ] `python scripts/recette_reelle.py --confirmer` : toutes les étapes réelles en une commande
+- [ ] Rappel : les tests contre `tests/faux_services/` (faux Nightshift, Zetaris, Postgres locaux) ne sont PAS des preuves sponsor
 - [ ] Vidéo 1–4 min enregistrée, sous-titrée, lien public vérifié en navigation privée
 - [ ] Diapositives exportées en PDF
 - [ ] README à jour (bloc « Démarrage rapide » repris de `docs/PROPOSITION-README.md`)
@@ -45,6 +48,11 @@ réelle (`--confirmer`) avant d'être présentés comme une mesure sponsor.
 5. **Gain chiffré** — P2 utilise 12 événements contre 21 pour P1 (−43 %) et 3 appels au modèle
    contre 5 (−40 %) ; P1 rejouée 5 fois : 5 conclusions identiques. *Mesures simulées : à
    remplacer par les mesures réelles.*
+5 bis. **War room et graphe de relations** — Un avocat du diable conteste la cause retenue ;
+   le détective doit citer une preuve existante, le code arbitre et borne le débat (recette W1 :
+   1 tour pour un plafond de 1, 2 appels pour un plafond de 6 ; W2 : preuves identiques avec et
+   sans débat ; W3 : arrêt « plafond de tours atteint »). Le graphe relie P1 et P2 (même
+   signature, hypothèses réfutées héritées) sans LLM. *Mesures simulées.*
 6. **Impact** — Moins de temps d'astreinte, aucune action irréversible sans validation, chaque
    conclusion traçable jusqu'à sa requête.
 7. **Suite** — Plus de sources Zetaris, calibration du seuil sur des incidents réels, mémoire
@@ -57,6 +65,7 @@ réelle (`--confirmer`) avant d'être présentés comme une mesure sponsor.
 | 0:00–1:00 | Pipeline rouge, journaux bruts | « Cette nuit, le pipeline orders_etl a cassé. Voici ce que voit l'astreinte. Rappel, lui, résume les journaux et propose deux hypothèses, chacune avec sa requête SQL. » |
 | 1:00–2:00 | Fil d'enquête P1, requêtes et résultats | « Chaque preuve est une requête envoyée à Zetaris ; le code, pas le modèle, décide si une hypothèse est retenue. Cause : colonne renommée. Le rayon d'impact est faible : correctif appliqué avec sauvegarde, pipeline vert. » |
 | 2:00–3:00 | P2 puis compteur P1/P2 | « Nouvel incident voisin : Rappel retrouve P1 et ne reteste pas les pistes réfutées. Moins d'événements, moins d'appels au modèle. » |
+| 2:30–3:00 | War room puis zone « Relations » | « Avant d'agir, un avocat du diable conteste la cause ; le détective doit citer une preuve déjà exécutée, le code arbitre et le débat s'arrête au plafond. Le graphe montre que P2 partage la signature de P1 et hérite de ses pistes réfutées. » |
 | 3:00–4:00 | P3, abstention, badges modèle | « Ici les preuves manquent : Rappel s'abstient et dit quoi chercher. Toutes les demandes passent par Meterless Nightshift vers Nemotron ; le modèle affiché est celui renvoyé par le service. » |
 
 Si une partie est filmée en mode simulé, l'écran doit montrer le badge « simulé ».
@@ -103,3 +112,5 @@ Si une partie est filmée en mode simulé, l'écran doit montrer le badge « sim
 | P2 / P1 appels LLM | 3 / 5 | idem |
 | P1 rejouée 5 fois | 5 / 5 conclusions identiques | `data/recette.json` (A15, simulé) |
 | Cycles complets G4 | 5 / 5 | `data/recette_globale.json` |
+| War room W1-W3 | 3 REUSSI (simulé) : 1 tour / plafond 1, 2 appels / plafond 6, arrêt « plafond de tours atteint » | `data/recette.json` (`cases_war_room`) |
+| Recette réelle | 8 étapes NON_MESURE sans clés (Nightshift, Zetaris, Postgres, A14, A15, boucle, war room, sponsors) | `data/recette_reelle.json` |

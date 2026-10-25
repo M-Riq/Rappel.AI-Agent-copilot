@@ -17,7 +17,7 @@ from rappel.enquete.protocoles import (
 )
 from rappel.action.rayon_impact import evaluer_rayon_impact
 from rappel.interfaces.run_sql import LIMITE_LIGNES, TABLES, creer_run_sql, valider_sql
-from . import graphe
+from . import graphe, war_room
 
 
 # Valeur par defaut de MAX_TOURS_ENQUETE ; enqueter() lit rappel.config.Configuration.
@@ -30,6 +30,7 @@ NB_HYPOTHESES_MIN = 2
 CONFIANCE_PAR_REQUETE_NON_VIDE = 0.45
 CONFIANCE_MAX = 0.95
 LIGNES_DANS_PROMPT = 10
+LONGUEUR_MAX_DONNEES_PROMPT = 60_000
 APERCU_LIGNES_EVENEMENT = 3
 RAISON_SANS_PREUVE = "aucune preuve SQL"
 REQUETES_TYPES = {
@@ -260,7 +261,13 @@ def description_outil() -> str:
 
 
 def construire_prompt(role: str, consignes: str, donnees: dict, note: str = "") -> str:
-    return f"Role: {role}. {consignes}\n{note}{MARQUEUR_DONNEES}{json.dumps(donnees, ensure_ascii=False)}"
+    # Garde-fou : jamais de données volumineuses ni de secret de l'environnement dans un prompt.
+    from rappel.securite import borner, masquer_secrets
+
+    texte = json.dumps(borner(donnees), ensure_ascii=False)
+    if len(texte) > LONGUEUR_MAX_DONNEES_PROMPT:
+        texte = json.dumps(borner(donnees, longueur_texte=500, elements=10), ensure_ascii=False)
+    return masquer_secrets(f"Role: {role}. {consignes}\n{note}{MARQUEUR_DONNEES}{texte}")
 
 
 def apercu(texte: str, longueur: int = 160) -> str:
@@ -275,6 +282,7 @@ def creer_graphe_sql(
     fabrique_run_sql: Callable[[ContexteIncident], RunSql] | None = None,
     max_tours: int = MAX_TOURS,
     appel_outils: bool = False,
+    configuration_war_room: "war_room.ConfigurationWarRoom | None" = None,
 ):
     ressources: dict[str, RunSql | None] = {"run_sql": run_sql}
     dernier = {"appels": []}
@@ -400,7 +408,7 @@ def creer_graphe_sql(
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
-            texte = "; ".join(graphe.decrire_souvenir(souvenir) for souvenir in souvenirs)
+            texte = "; ".join(graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
         emettre(etat, "decision", "systeme", texte)
         return etat
@@ -482,7 +490,7 @@ def creer_graphe_sql(
                 "signature": etat["contexte"].signature,
                 "hypotheses": [resume_hypothese(etat, hypothese) for hypothese in hypotheses],
                 "incident_similaire": bool(etat["souvenirs"]),
-                "souvenirs": [graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]],
+                "souvenirs": [graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"]],
                 "suivis_restants": MAX_REQUETES_SUIVI - suivis_utilises,
             }
             def analyser_verdict(texte):
@@ -573,6 +581,24 @@ def creer_graphe_sql(
         etat["hypotheses"] = nouvelles
         return etat
 
+    def debattre(etat: EtatSql):
+        # War room optionnelle : bornee par ses plafonds, elle ne touche jamais aux preuves citees.
+        if configuration_war_room is None or not configuration_war_room.active or etat.get("retenue") is None:
+            return {}
+        etat = preparer(etat)
+        preuves_citees = list(etat["preuves_retenue"])
+        preuves_retenue = list(etat["retenue"].preuves)
+
+        def emettre_debat(etat_debat, type_evenement, acteur, texte):
+            # En mode SQL, une preuve cite une requete executee : la verification du debat est une decision.
+            emettre(etat_debat, "decision" if type_evenement == "preuve" else type_evenement, acteur, texte)
+
+        etat = war_room.executer_debat(etat, llm, configuration_war_room, emettre_debat)
+        etat["preuves_retenue"] = preuves_citees
+        if etat["retenue"].preuves != preuves_retenue:
+            raise RuntimeError("la war room a modifie une preuve citee")
+        return etat
+
     def tables_preuves(etat: EtatSql) -> list[str]:
         return sorted({table for identifiant in etat.get("preuves_retenue", [])
                        for table in etat["requetes"][identifiant]["tables"]})
@@ -657,7 +683,7 @@ def creer_graphe_sql(
         )
         donnees = {"hypothese": hypothese, "contexte": resume, "cause_confirmee": cause,
                    "inclure_conclusion": fusion, "confiance": decision.confiance,
-                   "souvenirs": [graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"]]}
+                   "souvenirs": [graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"]]}
         reponse, modele = demander(etat, "correctif", consignes, donnees, analyser_correctif)
         if reponse is None:
             return renoncer(etat, "correctif non obtenu")
@@ -665,7 +691,7 @@ def creer_graphe_sql(
         if not any(identifiant in justification for identifiant in citees):
             justification += f" (requetes SQL : {', '.join(citees)})"
         if etat["souvenirs"]:
-            justification += "; " + "; ".join(graphe.decrire_souvenir(souvenir) for souvenir in etat["souvenirs"])
+            justification += "; " + "; ".join(graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in etat["souvenirs"])
         try:
             correctif = CorrectifPropose(
                 description=reponse.description,
@@ -708,13 +734,13 @@ def creer_graphe_sql(
     noeuds = {
         "charger_contexte": charger_contexte, "consulter_memoire": consulter_memoire,
         "proposer_hypotheses": proposer_hypotheses, "juger": juger,
-        "evaluer_confiance": evaluer_confiance, "abstention": terminer_abstention,
+        "war_room": debattre, "evaluer_confiance": evaluer_confiance, "abstention": terminer_abstention,
         "conclure": conclure, "ecrire_memoire": ecrire_memoire,
     }
     for nom, fonction in noeuds.items():
         graphe_sql.add_node(nom, fonction)
     sequence = [START, "charger_contexte", "consulter_memoire", "proposer_hypotheses", "juger",
-                "evaluer_confiance"]
+                "war_room", "evaluer_confiance"]
     for depart, arrivee in zip(sequence, sequence[1:]):
         graphe_sql.add_edge(depart, arrivee)
     graphe_sql.add_conditional_edges("evaluer_confiance", orienter,

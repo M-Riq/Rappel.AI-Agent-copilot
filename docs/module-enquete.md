@@ -88,11 +88,13 @@ JSON par evenement ; la fonction n'impose ni dossier ni extension.
 Sources : [boucle_sql.py](../src/rappel/enquete/boucle_sql.py),
 [run_sql.py](../src/rappel/interfaces/run_sql.py) (contrat backend : [run_sql.md](run_sql.md)).
 Principe : **le LLM propose, le code verifie**. Un tour = un appel LLM, plafond
-`MAX_TOURS = 6` (`max_tours`). La war room (hors MVP) n'existe qu'en mode `outils`.
+`MAX_TOURS = 6` (`max_tours`). La war room (optionnelle, `WAR_ROOM_ACTIVE=1`) s'insere entre `juger`
+et `evaluer_confiance` ; en mode SQL, sa verification des citations est un evenement `decision`
+(une `preuve` cite toujours une requete executee) et une preuve citee modifiee leve une erreur.
 
 ```text
 START -> charger_contexte -> consulter_memoire -> proposer_hypotheses -> juger
-      -> evaluer_confiance
+      -> war_room (si WAR_ROOM_ACTIVE=1 et une hypothese retenue) -> evaluer_confiance
            | abstient -> abstention -> END
            | sinon    -> conclure -> (correctif ? ecrire_memoire : abstention) -> END
 ```
@@ -315,7 +317,24 @@ modele `.env.example`, aucun secret suivi) :
 | `SEUIL_ABSTENTION` | `seuil_abstention` | Seuil unique de `decider` et `AbstentionSeuil` (0,6) |
 | `MAX_TOURS_ENQUETE` | `max_tours_enquete` | Plafond de tours de la boucle sql (6) |
 | `LLM_MAX_APPELS` | `llm_max_appels` | Plafond d'appels LLM par execution, relances comprises (20) |
+| `LLM_MAX_APPELS_SESSION` | `llm_max_appels_session` | Plafond d'appels factures (Nightshift) pour tout le processus, verifie avant chaque appel, war room comprise (200) |
 | `LLM_APPEL_OUTILS` | `appel_outils` | `0` (defaut) : requetes dans le JSON du texte ; `1` : appels d'outils natifs `run_sql` acceptes en plus |
+| `PIPELINE_DEMO_DIR`, `ACTION_REELLE_DEMO` | idem | Pipeline de demo isole (seul dossier modifiable) ; `1` = le correctif accepte y est execute |
+| `RAYON_SEUIL_AUTO`, `RAYON_SEUIL_VALIDATION`, `RAYON_MAX_ELEMENTS`, `RAYON_ELEMENTS_CRITIQUES` | `rayon_*` | Rayon d'impact calcule par le code : auto (confiance >= 0,9), validation, refus (< 0,6, irreversible, > 3 elements) |
+| `BOUCLE_JOURNAL_PATH` | `boucle_journal_path` | Journal de la boucle des 4 agents (sans secret) |
+| `API_URL` | `api_url` | URL de l'API lue par l'interface Streamlit |
+| `METERLESS_DELAI_S`, `ZETARIS_DELAI_S`, `RESEAU_DELAI_CONNEXION_S` | idem | Delais de lecture (180 s pour Nightshift, 60 s pour Zetaris) et de connexion (10 s), separes |
+| `RESEAU_RELANCES`, `RESEAU_ATTENTE_BASE_S`, `RESEAU_SEUIL_COUPE_CIRCUIT` | idem | Relances des erreurs passageres (hors ligne, delai, 429, 5xx) avec attente croissante (1 s, 2 s...), coupe-circuit apres 3 echecs consecutifs (60 s) ; jamais de relance sur 401/403/404 ([client_http.py](../src/rappel/interfaces/client_http.py)) |
+| `ZETARIS_CHEMIN_SQL`, `ZETARIS_CLE_SQL` | idem | Endpoint REST du SQL et cle du SQL dans le corps (defaut `/sql-editor/sqls/run`, `sql`) |
+
+Durcissement (R4) : une requete refusee par Zetaris pour un motif de dialecte qui cite la
+construction (LIMIT, IFNULL, !=, SUBSTR) est reformulee une seule fois en SQL standard (ex. LIMIT n ->
+FETCH FIRST n ROWS ONLY), repasse les garde-fous, puis abandon propre (`erreur SQL : apres une
+reformulation : ...`) ; `requete` est toujours le SQL reellement execute. Les donnees envoyees au
+modele sont bornees (textes de 4000 caracteres, listes de 50 elements, 60 000 caracteres au total)
+et passees au masquage des secrets ; tout journal `rappel.*` est masque des sa creation ; les
+rapports et le pipeline de demo sont ecrits de facon atomique et une action interrompue (Ctrl+C)
+restaure le pipeline a l'identique.
 
 Variables hors configuration unique, conservees pour des briques optionnelles :
 `WAR_ROOM_*` (war room, hors MVP, desactivee par defaut) et `LANGFUSE_*` (traceur optionnel).
@@ -451,6 +470,13 @@ variables d'environnement.
 
 ### War room et abstention
 
+Variables (voir `.env.example`, aucune valeur secrete) : `WAR_ROOM_ACTIVE` (0 par defaut),
+`WAR_ROOM_MAX_TOURS` (2), `WAR_ROOM_MAX_APPELS_LLM` (6). Roles affiches dans l'interface
+(etiquette « Debat · role ») : detective, avocat du diable (sceptique), historien (memoire),
+arbitre (code : verification des citations et bilan « War room terminee : motif »).
+Mesure : `GET /comparaison?a=<id>&mode=war_room` rejoue l'incident sans puis avec debat
+(memoire vide temporaire) ; recette : cases W1-W3 de `scripts/recette_module_a.py`.
+
 Le debat ne change ni les preuves ni le choix de la gagnante. L'historien resume
 la memoire sans LLM ; le sceptique emet une objection et le detective cite des
 preuves. Au moins une citation exactement presente dans la retenue suffit : le
@@ -503,9 +529,42 @@ un identifiant d'incident.
 - API locale sans authentification, etat des incidents en memoire du processus (un seul worker).
 - Seuils choisis sur trois fixtures et perturbations synthetiques ; la confiance est un
   score heuristique, pas une probabilite calibree.
-- La fusion conclusion + correctif repose sur un correctif `reussi` de meme signature.
+- La fusion conclusion + correctif repose sur le resultat `reussi` enregistre de meme signature,
+  meme s'il n'est pas encore confirme ; seul le libelle « resolu par » exige la confirmation.
 - War room et traceur Langfuse : hors configuration unique, desactives par defaut.
 - L'avertissement Pydantic sur le champ `schema` de `ContexteIncident` est connu.
+
+## 7 bis. Boucle des 4 agents, resultat confirme, graphe et rejeu
+
+**Boucle** ([boucle.py](../src/rappel/orchestration/boucle.py), [boucle_agents.py](../scripts/boucle_agents.py)) :
+`executer_boucle(scenario)` enchaine Ingestion (etat du pipeline de demo, contexte valide par le
+contrat) -> Memoire (lecture des souvenirs et refutations) -> Enquete (moteur SQL, war room selon
+`WAR_ROOM_ACTIVE`) -> Memoire (souvenir provisoire ecrit par le moteur) -> Action (rayon d'impact ;
+execution seulement si `ACTION_REELLE_DEMO=1` et sur le pipeline de demo isole, sinon proposition)
+-> Retour (resultat `reussi`/`echoue` de l'action ecrit en memoire). Chaque passage ecrit une ligne
+dans `data/boucle_journal.jsonl` (`BOUCLE_JOURNAL_PATH`) : agent, etape, statut, duree, mode
+simule/reel, detail court sans texte du modele ; ce journal n'est pas un evenement du contrat.
+`--surveiller` relit l'etat du pipeline toutes les `--intervalle` secondes et lance un cycle a
+chaque passage au rouge (un meme etat rouge une seule fois), avec `--max-cycles` et `--duree-max`.
+Mesure simulee (`--scenario p1,p2,p3`, memoire neuve) : P1 21 evenements / 5 appels, P2 12 / 3,
+P3 abstention (19 evenements, 3 appels), pipeline inchange.
+
+**Resultat confirme** : `enqueter(..., resultat_confirme=False)` (API et boucle) marque le souvenir
+« non confirme » dans `<memoire>.non_confirmes.json` (le contrat n'a que `reussi`/`echoue`).
+`graphe.decrire_souvenir` n'ecrit « incident similaire resolu par » que pour un resultat `reussi`
+confirme ; sinon « essaye : <correctif> (resultat non confirme) » ou « echec du correctif deja
+essaye (echoue) ». `mettre_a_jour_resultat` (retour de l'action) leve le marquage.
+
+**Graphe de relations** ([graphe_relations.py](../src/rappel/memoire/graphe_relations.py)) :
+deterministe, sans LLM, construit depuis la memoire (souvenirs, table des hypotheses) et les
+incidents connus ; sorties JSON `{noeuds, aretes}` et Mermaid ; `GET /graphe`, `GET /graphe/{id}` ;
+zone « Relations » de l'interface (`st.graphviz_chart` si disponible, sinon Mermaid + tableau).
+
+**Rejeu** : `GET /incidents/{id}/enquete/evenements?apres=N&jusqua=M` et curseur « Etape (rejeu) »
+de l'interface ; lecture seule, rien n'est recalcule.
+
+**Recette reelle** : `python scripts/recette_reelle.py --confirmer` (voir
+[INSTALLATION-DEMO.md](INSTALLATION-DEMO.md)) ; sans cles, chaque etape est NON_MESURE.
 
 ## 8. Checklist A1 a A15 (cahier MVP v4)
 
@@ -529,6 +588,9 @@ Etat mesure par `scripts/recette_module_a.py` en mode fake/fichier/json (23/10/2
 | A13 | Changer de voie ou de modele par configuration (METERLESS_MODEL_RAPIDE/PROFOND) | reussi (deux configurations) | - |
 | A14 | En mode reel, le modele renvoye contient « nemotron » | non mesure | non mesuree : Nightshift |
 | A15 | P1 rejouee 5 fois : meme conclusion au moins 4 fois | reussi (simule, 5/5) | non mesuree : Nightshift |
+| W1 | War room : debat borne par le plafond de tours et d'appels | reussi (simule, 1 tour / plafond 1, 2 appels / plafond 6) | non mesuree : Nightshift |
+| W2 | War room : le debat ne change jamais une preuve citee | reussi (simule) | non mesuree : Nightshift |
+| W3 | War room : arret clair (motif affiche) | reussi (simule, « plafond de tours atteint ») | non mesuree : Nightshift |
 
 Tests : [test_recette_module_a.py](../tests/test_recette_module_a.py), [test_enquete_sql.py](../tests/test_enquete_sql.py),
 [test_calibration_sql.py](../tests/test_calibration_sql.py), [test_conformite_contrats.py](../tests/test_conformite_contrats.py),

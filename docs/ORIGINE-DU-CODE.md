@@ -82,9 +82,25 @@ contre Nightshift, Zetaris ou Postgres réels.
 | `2d86978` | 23/10 19:06 | Traces Langfuse optionnelles |
 | `22bbea6` | 23/10 19:18 | Scripts de preparation de la machine de demo |
 | `7cf1ded` | 23/10 19:26 | Pilotage : acces, decisions, preuves sponsors |
-| commit suivant | 23/10 | Parcours de démarrage vérifié (`scripts/test_demarrage_propre.py`, `.gitattributes`) |
+| `f24451d` | 23/10 19:43 | Parcours de démarrage vérifié (`scripts/test_demarrage_propre.py`, `.gitattributes`) |
 
-## 6. Ce qui n'a pas été repris
+## 6. Boucle des 4 agents (branche `naomy/boucle-4-agents`, 24 octobre 2026)
+
+Écrits par Naomy avec un assistant de code. Tout est vérifié en mode simulé (LLM fake, base SQLite,
+mémoire JSON, pipeline de démo) ; rien n'a été exécuté contre Nightshift, Zetaris ou Postgres réels
+(`scripts/recette_reelle.py --confirmer` reste à lancer avec les clés).
+
+| Commit | Date | Contenu |
+| --- | --- | --- |
+| `55a321b` | 24/10 08:47 | Orchestrateur de la boucle des 4 agents |
+| `422305f` | 24/10 09:05 | Resultat confirme avant de dire resolu |
+| `be2b225` | 24/10 09:14 | War room : affichage et comparaison |
+| `f3c40ee` | 24/10 09:20 | Graphe de relations des incidents |
+| `bd7f4c6` | 24/10 09:23 | Rejeu d'une enquete jusqu'a une etape |
+| `3c26f5f` | 24/10 09:30 | Recette reelle en une commande |
+| commit suivant | 24/10 | Documentation boucle, war room, graphe |
+
+## 7. Ce qui n'a pas été repris
 
 - Adaptateurs NVIDIA et Claude, secours entre fournisseurs, variables `NIGHTSHIFT_*` et
   `RUN_SQL_BACKEND` : l'équipe passe uniquement par Meterless et par sa configuration.

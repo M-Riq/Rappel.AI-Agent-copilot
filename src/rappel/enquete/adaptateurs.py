@@ -8,13 +8,17 @@
 
 from contextlib import contextmanager
 import json
+from pathlib import Path
 from threading import Lock
 
-from rappel.config import Configuration, charger
+from rappel.config import RACINE, Configuration, charger
 from rappel.enquete.modeles import EnregistrementMemoire, Hypothese
 from rappel.enquete.protocoles import UsageLLM, usage_par_voie, voie_pour_role
 from rappel.interfaces import llm as llm_squelette
 from rappel.interfaces import memoire as memoire_squelette
+
+
+_VERROU_NON_CONFIRMES = Lock()
 
 
 class LLMIndisponible(RuntimeError):
@@ -40,6 +44,29 @@ class _BudgetAppels:
             if self.appels >= self.maximum:
                 raise LLMBudgetEpuise("Plafond LLM_MAX_APPELS atteint pour cette exécution")
             self.appels += 1
+
+
+class _BudgetSession:
+    """Appels facturés du processus (toutes enquêtes, war room comprise) : LLM_MAX_APPELS_SESSION."""
+
+    def __init__(self) -> None:
+        self.appels = 0
+        self.verrou = Lock()
+
+    def consommer(self, maximum: int) -> None:
+        with self.verrou:
+            if self.appels >= maximum:
+                raise LLMBudgetEpuise("Plafond LLM_MAX_APPELS_SESSION atteint pour cette session : "
+                                      "relancer le processus après accord de l'équipe")
+            self.appels += 1
+
+
+BUDGET_SESSION = _BudgetSession()
+
+
+def reinitialiser_budget_session() -> None:
+    with BUDGET_SESSION.verrou:
+        BUDGET_SESSION.appels = 0
 
 
 @contextmanager
@@ -83,6 +110,7 @@ class LLMEnquete:
     def __init__(self, fournisseur, configuration: Configuration | None = None, budget=None) -> None:
         configuration = configuration or charger()
         self.fournisseur = fournisseur
+        self._max_session = configuration.llm_max_appels_session
         self._budget = budget or _BudgetAppels(configuration.llm_max_appels)
         self.usage = UsageLLM(par_voie=usage_par_voie())
         self.derniere_reponse_info: dict | None = None
@@ -106,7 +134,10 @@ class LLMEnquete:
         return choisir(role) if callable(choisir) else None
 
     def completer(self, prompt: str, role: str = "detective", tools: list | None = None) -> str:
+        # Plafonds vérifiés AVANT tout appel : par exécution, puis par session si l'appel est facturé.
         self._budget.consommer()
+        if getattr(self.fournisseur, "facture", False):
+            BUDGET_SESSION.consommer(self._max_session)
         voie = voie_pour_role(role)
         compteur = self.usage.par_voie[voie]
         self.usage.nb_appels += 1
@@ -233,7 +264,10 @@ class MemoireEnquete:
         return [EnregistrementMemoire.model_validate(element) for element in self.backend.lister()]
 
     def vider(self) -> int:
-        return self.backend.vider()
+        nombre = self.backend.vider()
+        with _VERROU_NON_CONFIRMES:
+            self._ecrire_non_confirmes([])
+        return nombre
 
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         enregistrement = EnregistrementMemoire.model_validate(enregistrement.model_dump())
@@ -242,8 +276,58 @@ class MemoireEnquete:
     def hypotheses_refutees(self, signature: str) -> list[str]:
         return self.backend.hypotheses_refutees(signature)
 
+    # Registre des résultats non confirmés : le contrat n'a que « reussi » / « echoue », un souvenir
+    # écrit avant l'action est donc marqué à part, jusqu'au retour du résultat de l'action.
+    @property
+    def chemin_non_confirmes(self) -> Path:
+        chemin = self.chemin
+        if not isinstance(chemin, Path):
+            chemin = Path(charger().memoire_json_path)
+            chemin = chemin if chemin.is_absolute() else RACINE / chemin
+        return chemin.with_name(chemin.stem + ".non_confirmes.json")
+
+    @staticmethod
+    def _cle(souvenir: EnregistrementMemoire) -> list[str]:
+        return [souvenir.signature, souvenir.correctif_essaye, souvenir.date, souvenir.cause_confirmee]
+
+    def _lire_non_confirmes(self) -> list[list[str]]:
+        try:
+            donnees = json.loads(self.chemin_non_confirmes.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [cle for cle in donnees if isinstance(cle, list)] if isinstance(donnees, list) else []
+
+    def _ecrire_non_confirmes(self, cles: list[list[str]]) -> None:
+        chemin = self.chemin_non_confirmes
+        if not cles and not chemin.exists():
+            return
+        # Écriture atomique (fichier temporaire puis remplacement) : jamais de fichier tronqué.
+        memoire_squelette.MemoireJSON._ecrire_liste(chemin, cles)
+
+    def marquer_non_confirme(self, enregistrement: EnregistrementMemoire) -> None:
+        with _VERROU_NON_CONFIRMES:
+            existantes = {tuple(self._cle(souvenir)) for souvenir in self.lister()}
+            # Les clés orphelines (souvenir effacé ou mémoire remplacée) sont purgées au passage.
+            cles = [cle for cle in self._lire_non_confirmes() if tuple(cle) in existantes]
+            cle = self._cle(enregistrement)
+            if cle not in cles:
+                cles.append(cle)
+            self._ecrire_non_confirmes(cles)
+
+    def statut_resultat(self, souvenir: EnregistrementMemoire) -> str:
+        """reussi, echoue ou non_confirme (souvenir provisoire en attente du résultat de l'action)."""
+        return "non_confirme" if self._cle(souvenir) in self._lire_non_confirmes() else souvenir.resultat
+
     def mettre_a_jour_resultat(self, signature: str, resultat: str) -> bool:
-        return self.backend.mettre_a_jour_resultat(signature, resultat)
+        souvenirs = self.chercher(signature)
+        mis_a_jour = self.backend.mettre_a_jour_resultat(signature, resultat)
+        if mis_a_jour and souvenirs:
+            cle = self._cle(souvenirs[-1])
+            with _VERROU_NON_CONFIRMES:
+                cles = self._lire_non_confirmes()
+                if cle in cles:
+                    self._ecrire_non_confirmes([element for element in cles if element != cle])
+        return mis_a_jour
 
     def ecrire_hypotheses(self, incident_id: str, signature: str, hypotheses: list[Hypothese]) -> None:
         self.backend.ecrire_hypotheses(
