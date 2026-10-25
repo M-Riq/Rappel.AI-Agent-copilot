@@ -1,4 +1,6 @@
 import importlib.util
+import json
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -15,32 +17,106 @@ ui = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ui)
 
 
-def test_evenements_api_et_timeout(monkeypatch):
-    evenements = [{"etape": 1, "horodatage": "2026-01-01", "message": "OK"}]
-    reponse = Mock()
-    reponse.json.return_value = {"evenements": evenements}
-    obtenir = Mock(return_value=reponse)
-    monkeypatch.setattr(ui.requests, "get", obtenir)
-    resultat, hors_ligne = ui.charger_evenements(Configuration())
-    assert resultat == evenements
-    assert not hors_ligne
-    obtenir.assert_called_once_with(
-        "http://127.0.0.1:8000/incidents/p1/evenements", timeout=5
+CONTEXTE = {
+    "incident_id": "live-001",
+    "horodatage": "2026-10-25T10:00:00Z",
+    "signature": "schema_mismatch:orders_etl",
+    "logs": [{"template": "KeyError: column <*> not found", "compte": 4}],
+    "commits_recents": [],
+    "schema": {"attendu": ["amount"], "observe": ["total"]},
+    "metriques": {"lignes_rejetees": 4, "latence_ms": 120},
+}
+
+
+def configuration_reelle():
+    return replace(
+        Configuration(),
+        llm_provider="meterless",
+        meterless_runtime_token="runtime-test-token",
+        meterless_model_rapide="nemotron-lightning",
+        meterless_model_profond="nemotron-super",
+        source_provider="zetaris",
+        zetaris_api_key="zetaris-test-key",
+        zetaris_org_id="org-test",
+        memoire_provider="postgres",
     )
 
 
-@pytest.mark.parametrize(
-    "probleme",
-    [
-        requests.ConnectionError("******example.invalid"),
-        ValueError("JSON invalide avec secret"),
-    ],
-)
-def test_repli_fixture(monkeypatch, probleme):
-    monkeypatch.setattr(ui.requests, "get", Mock(side_effect=probleme))
-    evenements, hors_ligne = ui.charger_evenements(Configuration())
-    assert hors_ligne
-    assert evenements
+def test_lire_contexte_json_valide():
+    assert ui.lire_contexte_json(json.dumps(CONTEXTE)) == CONTEXTE
+
+
+@pytest.mark.parametrize("contenu", ["{", "[]", '{"incident_id":"incomplet"}'])
+def test_lire_contexte_json_refuse_document_invalide(contenu):
+    with pytest.raises(ValueError):
+        ui.lire_contexte_json(contenu)
+
+
+def test_configuration_reelle_exige_les_trois_fournisseurs():
+    assert ui.verifier_configuration_reelle(Configuration(), {}) == [
+        "LLM_PROVIDER=meterless",
+        "SOURCE_PROVIDER=zetaris",
+        "MEMOIRE_PROVIDER=postgres",
+        "METERLESS_RUNTIME_TOKEN",
+        "METERLESS_MODEL_RAPIDE",
+        "METERLESS_MODEL_PROFOND",
+        "ZETARIS_API_KEY",
+        "modes réels confirmés par /healthz",
+    ]
+
+
+def test_configuration_reelle_acceptee_si_modes_et_secrets_presents():
+    sante = {
+        "llm": "meterless",
+        "source": "zetaris",
+        "memoire": "postgres",
+    }
+    assert ui.verifier_configuration_reelle(configuration_reelle(), sante) == []
+
+
+def test_soumettre_incident_appelle_api_sans_fallback(monkeypatch):
+    reponse = Mock()
+    reponse.json.return_value = {"id": "live-001"}
+    poster = Mock(return_value=reponse)
+    monkeypatch.setattr(ui.requests, "post", poster)
+
+    assert ui.soumettre_incident("http://127.0.0.1:8000", CONTEXTE) == "live-001"
+    poster.assert_called_once_with(
+        "http://127.0.0.1:8000/incidents",
+        json=CONTEXTE,
+        timeout=10,
+    )
+
+
+def test_soumission_api_indisponible_est_signalee(monkeypatch):
+    monkeypatch.setattr(
+        ui.requests,
+        "post",
+        Mock(side_effect=requests.ConnectionError("secret")),
+    )
+    with pytest.raises(RuntimeError, match="API locale"):
+        ui.soumettre_incident("http://127.0.0.1:8000", CONTEXTE)
+
+
+def test_resultat_exige_provenance_reelle_et_memoire_postgres():
+    resultat = {
+        "statut": "termine",
+        "llm": "meterless",
+        "source_preuves": "zetaris",
+        "preuves_simulees": False,
+        "enquete_simulee": False,
+        "memoire_mode": "postgres",
+    }
+    assert ui.verifier_resultat_reel(resultat)
+    for cle, valeur in (
+        ("llm", "fake"),
+        ("source_preuves", "simule-sqlite"),
+        ("preuves_simulees", True),
+        ("enquete_simulee", True),
+        ("memoire_mode", "fallback-json"),
+    ):
+        resultat_invalide = {**resultat, cle: valeur}
+        assert not ui.verifier_resultat_reel(resultat_invalide)
 
 
 def test_tri_etape_puis_horodatage():
@@ -50,53 +126,37 @@ def test_tri_etape_puis_horodatage():
         {"etape": 2, "horodatage": "2026-01-01"},
     ]
     assert ui.trier_evenements(evenements) == [
-        evenements[2], evenements[1], evenements[0]
+        evenements[2],
+        evenements[1],
+        evenements[0],
     ]
 
 
-def test_streamlit_hors_ligne_sans_erreur_brute(monkeypatch):
+def test_streamlit_hors_ligne_ne_charge_aucune_fixture(monkeypatch):
+    monkeypatch.setattr(ui, "charger", configuration_reelle)
     monkeypatch.setattr(
-        requests, "get",
-        Mock(side_effect=requests.ConnectionError("******example.invalid")),
+        ui.requests,
+        "get",
+        Mock(side_effect=requests.ConnectionError("secret")),
     )
     app = AppTest.from_file(str(APP)).run(timeout=15)
     assert not app.exception
-    assert any("API coupée" in message.value for message in app.warning)
-    assert any("214 KeyError" in message.value for message in app.info)
-    assert "secret" not in str(app)
+    assert any("Aucun résultat local ou fixture" in item.value for item in app.error)
+    assert "214 KeyError" not in str(app)
     assert "example.invalid" not in str(app)
 
 
-def test_streamlit_mode_et_champs_optionnels(monkeypatch):
-    def obtenir(url, **kwargs):
-        assert kwargs["timeout"] == 5
-        assert url.endswith(("/healthz", "/incidents/p1/evenements"))
-        reponse = Mock()
-        reponse.json.return_value = (
-            {
-                "statut": "ok",
-                "llm": "fake",
-                "source": "fichier",
-                "memoire": "json",
-            } if url.endswith("/healthz") else [
-                {
-                    "etape": 1,
-                    "type": "erreur",
-                    "texte": "<script>alert('x')</script>",
-                    "modele": "fake/nemotron",
-                    "requete_sql": "SELECT 1 AS one",
-                }
-            ]
-        )
-        return reponse
-
-    monkeypatch.setattr(requests, "get", obtenir)
+def test_streamlit_refuse_configuration_fake(monkeypatch):
+    monkeypatch.setattr(ui, "charger", Configuration)
+    reponse = Mock()
+    reponse.json.return_value = {
+        "statut": "ok",
+        "llm": "fake",
+        "source": "fichier",
+        "memoire": "json",
+    }
+    monkeypatch.setattr(ui.requests, "get", Mock(return_value=reponse))
     app = AppTest.from_file(str(APP)).run(timeout=15)
     assert not app.exception
-    assert any(
-        "Mode API — llm : fake · source : fichier · memoire : json" in texte.value
-        for texte in app.text
-    )
-    assert any("fake/nemotron" in texte.value for texte in app.text)
-    assert app.code[0].value == "SELECT 1 AS one"
-    assert app.error[0].value == "<script>alert('x')</script>"
+    assert any("Configuration réelle incomplète" in item.value for item in app.error)
+    assert not app.button
