@@ -6,11 +6,32 @@ import { fileURLToPath } from "node:url";
 
 const racine = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serveur = path.join(racine, "scripts", "hmem_serveur.py");
+// python3 par défaut : sur macOS, « python » peut être Python 2 hors du .venv.
+const pythonParDefaut = process.platform === "win32" ? "python" : "python3";
+let pythonVerifie: string | undefined;
 
 type RecordShape = Record<string, any> & { id: string };
 
 function erreur(message: string): never {
   throw new Error(`H-MEM Python : ${message}`);
+}
+
+function interpreteur(): string {
+  const commande = process.env.PYTHON ?? pythonParDefaut;
+  if (pythonVerifie === commande) return commande;
+  const essai = spawnSync(
+    commande,
+    ["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"],
+    { encoding: "utf8" },
+  );
+  if (essai.error || essai.status !== 0) {
+    erreur(
+      `interpréteur « ${commande} » introuvable ou antérieur à Python 3.11 ; ` +
+        "définir PYTHON vers le Python du .venv de Rappel (ex. PYTHON=/chemin/Rappel/.venv/bin/python).",
+    );
+  }
+  pythonVerifie = commande;
+  return commande;
 }
 
 function recordProxy(hmem: HMEM, value: RecordShape): RecordShape {
@@ -70,9 +91,9 @@ export class HMEM {
     };
   }
 
-  private call(op: string, data: Record<string, unknown>): any {
+  call(op: string, data: Record<string, unknown>): any {
     const child = spawnSync(
-      process.env.PYTHON ?? "python",
+      interpreteur(),
       [serveur],
       {
         input: `${JSON.stringify({

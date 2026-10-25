@@ -99,11 +99,47 @@ officiels dans `tests/fixtures/hmem/`, et non la suite officielle.
 doivent être rapportés séparément ; un portage vert ne constitue pas une preuve
 de conformité officielle.
 
-Exécution du runner officiel depuis `engines/hmem/conformance` de Meterless :
+### Lancer la suite officielle (A)
+
+Prérequis : Node.js (outil de développement seulement) et le `.venv` de Rappel
+(Python ≥ 3.11). Le pont lance `python3` par défaut (`python` sous Windows) ;
+`PYTHON` permet de désigner explicitement le Python du `.venv`. Sur macOS, hors du
+`.venv`, `python` peut être Python 2 : le pont s'arrête alors avec un message clair.
+
+Une seule fois :
 
 ```bash
-HMEM_IMPL=/chemin/absolu/vers/Rappel/conformance/rappel_hmem.ts npx --yes tsx@4.23.15 runner.ts
+git clone --depth 1 https://github.com/Meterless/Meterless /tmp/meterless
+cd /tmp/meterless/engines/hmem/reference && npm install
 ```
+
+Puis, depuis `engines/hmem/reference` (macOS / Linux) :
+
+```bash
+cd /tmp/meterless/engines/hmem/reference
+PYTHON="$HOME/chemin/vers/Rappel.AI-Agent-copilot/.venv/bin/python" \
+HMEM_IMPL="$HOME/chemin/vers/Rappel.AI-Agent-copilot/conformance/rappel_hmem.ts" \
+npx tsx ../conformance/runner.ts
+echo "code de sortie : $?"
+```
+
+Windows (PowerShell, chemins absolus avec des barres obliques) :
+
+```powershell
+cd C:\temp\meterless\engines\hmem\reference
+$env:PYTHON = "C:/chemin/vers/Rappel.AI-Agent-copilot/.venv/Scripts/python.exe"
+$env:HMEM_IMPL = "C:/chemin/vers/Rappel.AI-Agent-copilot/conformance/rappel_hmem.ts"
+npx tsx ../conformance/runner.ts
+"code de sortie : $LASTEXITCODE"
+```
+
+Résultat attendu : `13/13 checks passed` et code de sortie `0` (`1` : au moins un
+échec ; `2` : implémentation non chargée). Résultat mesuré le 25 oct. 2026 sur
+macOS, Python 3.11 (`.venv`) : **13/13, code 0**. Les avertissements `npm audit`
+concernent les outils du dépôt Meterless, pas Rappel : ne pas lancer
+`npm audit fix --force` (cela changerait les versions de la suite officielle).
+
+### Mesures P1 / P2
 
 Avec les fixtures P1/P2/P3 et le LLM fake, la recette a mesuré P1 à 21 événements
 et 5 appels LLM, puis P2 à 12 événements et 3 appels ; P2 a retrouvé trois pistes
