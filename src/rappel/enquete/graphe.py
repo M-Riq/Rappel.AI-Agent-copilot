@@ -188,13 +188,17 @@ def creer_graphe(
     def consulter_memoire(etat: EtatEnquete):
         etat = preparer(etat)
         signature = etat["contexte"].signature
-        souvenirs = memoire.chercher(signature)
+        chercher_contexte = getattr(memoire, "chercher_contexte", None)
+        souvenirs = chercher_contexte(signature, etat["contexte"]) if callable(chercher_contexte) else memoire.chercher(signature)
         refutees = memoire.hypotheses_refutees(signature)
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
             texte = "; ".join(decrire_souvenir(souvenir, statut_souvenir(memoire, souvenir)) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
+        trace = getattr(getattr(memoire, "backend", None), "last_search_trace", None)
+        if trace and trace.get("context"):
+            texte = f'{trace["context"]}\n{texte}'
         emettre(etat, "preuve", "historien", texte)
         return etat
 

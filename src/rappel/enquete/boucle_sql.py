@@ -183,6 +183,7 @@ class EtatSql(TypedDict, total=False):
     contexte: ContexteIncident | dict
     evenements: list[EvenementEnquete]
     souvenirs: list[EnregistrementMemoire]
+    contexte_memoire: str
     refutees_connues: list[str]
     hypotheses: list[Hypothese]
     categories: dict[str, str | None]
@@ -197,6 +198,7 @@ class EtatSql(TypedDict, total=False):
     nb_ecartees_par_memoire: int
     nb_appels_llm: int
     erreur_llm: str | None
+    cause_confirmee: str | None
     nb_tours: int
     nb_requetes_sql: int
     nb_appels_rapide: int
@@ -403,13 +405,18 @@ def creer_graphe_sql(
     def consulter_memoire(etat: EtatSql):
         etat = preparer(etat)
         signature = etat["contexte"].signature
-        souvenirs = memoire.chercher(signature)
+        chercher_contexte = getattr(memoire, "chercher_contexte", None)
+        souvenirs = chercher_contexte(signature, etat["contexte"]) if callable(chercher_contexte) else memoire.chercher(signature)
         refutees = memoire.hypotheses_refutees(signature)
         etat.update(souvenirs=souvenirs, refutees_connues=refutees)
         texte = "aucun incident similaire"
         if souvenirs:
             texte = "; ".join(graphe.decrire_souvenir(souvenir, graphe.statut_souvenir(memoire, souvenir)) for souvenir in souvenirs)
             texte += "; hypotheses refutees connues : " + json.dumps(refutees, ensure_ascii=True)
+        trace = getattr(getattr(memoire, "backend", None), "last_search_trace", None)
+        if trace and trace.get("context"):
+            etat["contexte_memoire"] = trace["context"]
+            texte = f'{trace["context"]}\n{texte}'
         emettre(etat, "decision", "systeme", texte)
         return etat
 
@@ -420,6 +427,7 @@ def creer_graphe_sql(
         consignes = (
             "Propose au moins deux hypotheses de cause, chacune avec UNE requete SQL qui la mettrait "
             "a l'epreuve. Tu ne conclus pas : le code execute les requetes. "
+            "Les souvenirs fournis sont des pistes à revérifier et ne constituent jamais une preuve. "
             + description_outil()
             + "Hypotheses deja refutees pour cette signature, a NE PAS reproposer : "
             + json.dumps(refutees, ensure_ascii=False)
@@ -429,7 +437,8 @@ def creer_graphe_sql(
                "d'une hypothese du tableau sans champ sql." if appel_outils else "")
         )
         donnees = {"signature": contexte.signature, "resume": resume_contexte(contexte),
-                   "hypotheses_refutees": refutees}
+                   "hypotheses_refutees": refutees,
+                   "souvenirs_a_reverifier": etat.get("contexte_memoire", "")}
 
         def analyser(reponse):
             if appel_outils:
@@ -667,6 +676,13 @@ def creer_graphe_sql(
                 return renoncer(etat, "conclusion non obtenue")
             cause = reponse.cause_confirmee
             emettre(etat, "decision", "systeme", f"Cause confirmee : {cause}", modele)
+        else:
+            cause = next(
+                (souvenir.cause_confirmee for souvenir in etat["souvenirs"]
+                 if souvenir.resultat == "reussi"),
+                None,
+            )
+        etat["cause_confirmee"] = cause
 
         def analyser_correctif(texte: str) -> ReponseCorrectif:
             reponse = ReponseCorrectif.model_validate_json(extraire_valeur_json(texte, dict))
@@ -719,7 +735,31 @@ def creer_graphe_sql(
             correctif_essaye=etat["correctif"].description,
             resultat=etat["resultat_action"], date=graphe.aujourdhui(),
         )
-        memoire.ecrire(enregistrement)
+        ecrire_incident = getattr(memoire, "ecrire_incident", None)
+        if callable(ecrire_incident):
+            preuves_sql = [
+                {
+                    "id": identifiant, "sql": etat["requetes"][identifiant]["sql"],
+                    "nb_lignes": etat["requetes"][identifiant]["nb_lignes"],
+                    "erreur": etat["requetes"][identifiant]["erreur"],
+                    "tables": etat["requetes"][identifiant]["tables"],
+                }
+                for identifiant in etat.get("preuves_retenue", [])
+                if identifiant in etat.get("requetes", {})
+                and etat["requetes"][identifiant]["nb_lignes"] > 0
+                and etat["requetes"][identifiant]["erreur"] is None
+                and etat["requetes"][identifiant]["sql"].strip()
+            ]
+            ecrire_incident(
+                enregistrement, incident_id=etat["contexte"].incident_id,
+                cause=etat.get("cause_confirmee"),
+                confiance=etat["decision_abstention"].confiance,
+                preuves_sql=preuves_sql,
+                hypotheses=etat["hypotheses"],
+                composants=[composant(etat["contexte"])],
+            )
+        else:
+            memoire.ecrire(enregistrement)
         etat["enregistrement"] = enregistrement
         emettre(etat, "decision", "systeme", "Resultat provisoire enregistre en memoire")
         return etat

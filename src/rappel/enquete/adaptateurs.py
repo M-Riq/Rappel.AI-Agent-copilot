@@ -257,6 +257,12 @@ class MemoireEnquete:
     def chemin_hypotheses(self):
         return getattr(self.backend, "chemin_hypotheses", None)
 
+    def chercher_contexte(self, signature: str, contexte):
+        chercher = getattr(self.backend, "chercher_contexte", None)
+        if callable(chercher):
+            return [EnregistrementMemoire.model_validate(element) for element in chercher(signature, contexte)]
+        return self.chercher(signature)
+
     def chercher(self, signature: str) -> list[EnregistrementMemoire]:
         return [EnregistrementMemoire.model_validate(element) for element in self.backend.chercher(signature)]
 
@@ -272,6 +278,13 @@ class MemoireEnquete:
     def ecrire(self, enregistrement: EnregistrementMemoire) -> None:
         enregistrement = EnregistrementMemoire.model_validate(enregistrement.model_dump())
         self.backend.ecrire(enregistrement.model_dump(mode="json"))
+
+    def ecrire_incident(self, enregistrement, **metadata) -> None:
+        ecrire = getattr(self.backend, "ecrire_incident", None)
+        if callable(ecrire):
+            ecrire(enregistrement, **metadata)
+            return
+        self.ecrire(enregistrement)
 
     def hypotheses_refutees(self, signature: str) -> list[str]:
         return self.backend.hypotheses_refutees(signature)
