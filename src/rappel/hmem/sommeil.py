@@ -56,7 +56,14 @@ class SleepCycleService:
         archived = set(plan.get("toArchive", [])) & set(valid["toArchive"])
         consolidates = set(plan.get("toConsolidate", [])) & set(valid["toConsolidate"])
         synthesizes = plan.get("toSynthesize", [])
-        self._backup_seq += 1
+        existing = self.store.stockage.executer(
+            lambda db: db.execute("SELECT id FROM hmem_backups").fetchall()
+        )
+        numeros = [
+            int(row["id"].removeprefix("backup-")) for row in existing
+            if row["id"].startswith("backup-") and row["id"].removeprefix("backup-").isdigit()
+        ]
+        self._backup_seq = max(self._backup_seq, max(numeros, default=0)) + 1
         backup_id = f"backup-{self._backup_seq}"
         snapshot = self.store.snapshot_all()
         self.store.stockage.executer(lambda db: db.execute(

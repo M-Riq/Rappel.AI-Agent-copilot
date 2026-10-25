@@ -49,7 +49,7 @@ def main(argv=None, fabrique_llm=None, memoire=None) -> int:
     parseur.add_argument("--intervalle", type=float, default=5.0, help="Secondes entre deux lectures de l'état")
     parseur.add_argument("--max-cycles", type=int, default=3, help="Plafond de cycles en surveillance")
     parseur.add_argument("--duree-max", type=float, default=600.0, help="Durée maximale de surveillance (s)")
-    parseur.add_argument("--memoire-neuve", action="store_true", help="Mémoire JSON temporaire (sinon la mémoire configurée)")
+    parseur.add_argument("--memoire-neuve", action="store_true", help="Mémoire temporaire isolée pour la séquence")
     parseur.add_argument("--confirmer", action="store_true", help="Autoriser les appels à un service réel")
     parseur.add_argument("--json", type=Path, default=RACINE / "data" / "boucle_resultats.json")
     arguments = parseur.parse_args(argv)
@@ -71,10 +71,18 @@ def main(argv=None, fabrique_llm=None, memoire=None) -> int:
     if not configuration.action_reelle_demo:
         afficher("ACTION_REELLE_DEMO=0 : les correctifs sont proposés, jamais exécutés.")
     with TemporaryDirectory() as temporaire:
+        moteur_ephemere = None
         if memoire is None and arguments.memoire_neuve:
             from rappel.enquete.adaptateurs import MemoireEnquete
 
-            memoire = MemoireEnquete.json(Path(temporaire) / "memoire.json")
+            if configuration.memoire_provider == "hmem":
+                from rappel.interfaces.memoire_hmem import MemoireHMEM
+
+                backend = MemoireHMEM(Path(temporaire) / "memoire.sqlite")
+                moteur_ephemere = backend.hmem
+                memoire = MemoireEnquete(backend)
+            else:
+                memoire = MemoireEnquete.json(Path(temporaire) / "memoire.json")
         options = {"memoire": memoire, "fabrique_llm": fabrique_llm, "configuration": configuration}
         try:
             if arguments.scenario:
@@ -91,6 +99,9 @@ def main(argv=None, fabrique_llm=None, memoire=None) -> int:
         except Exception:
             afficher("Boucle interrompue : vérifier la configuration ; aucun détail sensible affiché.")
             return 1
+        finally:
+            if moteur_ephemere is not None:
+                moteur_ephemere.close()
     afficher("Scénario | Statut | Signature | Issue | Événements | Appels | War room | Action | Mémoire")
     for cycle in cycles:
         afficher(ligne_cycle(cycle.resume))

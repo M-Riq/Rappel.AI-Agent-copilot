@@ -26,7 +26,8 @@ def masquer_secrets(texte) -> str:
     """Texte sans valeur secrète connue, sans identifiant d'URL et sans jeton « Bearer »."""
     texte = str(texte)
     valeurs = sorted((valeur for nom, valeur in os.environ.items()
-                      if valeur and len(valeur) >= 4 and any(mot in nom.upper() for mot in MOTS_SENSIBLES)),
+                      if valeur and len(valeur) >= 4 and valeur.lower() not in {"true", "false", "null"}
+                      and any(mot in nom.upper() for mot in MOTS_SENSIBLES)),
                      key=len, reverse=True)
     for valeur in valeurs:
         texte = texte.replace(valeur, MASQUE)

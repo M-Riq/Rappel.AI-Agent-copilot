@@ -221,7 +221,7 @@ def test_p2_apres_p1_economie_et_aucun_retest(tmp_path):
     sql_refutees = {sql for texte, _, sql in _faux_sql.CANDIDATS if texte in refutees}
     assert not any(execution.requete.removesuffix(" LIMIT 50") in sql_refutees for execution in espion.executees)
     assert second.metriques.nb_ecartees_par_memoire == len(refutees)
-    assert "type de colonne modifié" in second.correctif.justification
+    assert "colonne renommée" in second.correctif.justification
 
 
 def test_memoire_contraire_aucun_correctif_de_schema(tmp_path):

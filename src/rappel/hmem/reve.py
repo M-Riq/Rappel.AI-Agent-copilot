@@ -1,5 +1,7 @@
 """Rêve H-MEM : propositions contrôlées, sans matérialisation automatique."""
 
+import json
+
 from .embeddings import cosine, jaccard
 from .modeles import DEFAULTS, DreamProposal
 
@@ -7,8 +9,25 @@ from .modeles import DEFAULTS, DreamProposal
 class DreamingService:
     def __init__(self, store, ledger, clock, actor="system"):
         self.store, self.ledger, self.clock, self.actor = store, ledger, clock, actor
-        self._proposals = {}
-        self._seq = 0
+        rows = self.store.stockage.executer(
+            lambda db: db.execute("SELECT donnees FROM hmem_propositions ORDER BY rowid").fetchall()
+        )
+        self._proposals = {
+            data["id"]: DreamProposal(**data)
+            for data in (json.loads(row["donnees"]) for row in rows)
+        }
+        self._seq = max(
+            (int(proposal_id.removeprefix("dream-")) for proposal_id in self._proposals),
+            default=0,
+        )
+
+    def _persist(self, proposal):
+        donnees = json.dumps(proposal.__dict__, ensure_ascii=False, separators=(",", ":"))
+        self.store.stockage.executer(lambda db: db.execute(
+            "INSERT INTO hmem_propositions(id, donnees) VALUES (?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET donnees=excluded.donnees",
+            (proposal.id, donnees),
+        ))
 
     def _relatedness(self, a, b):
         return (
@@ -43,6 +62,7 @@ class DreamingService:
                 suggestedDomain=suggested,
             )
             self._proposals[proposal.id] = proposal
+            self._persist(proposal)
             created.append(proposal)
             self.ledger.log(proposal.id, "dream_proposed", self.actor,
                             details={"type": type_proposition, "derivedFrom": lineage})
@@ -82,6 +102,7 @@ class DreamingService:
     def approve(self, proposal_id):
         proposal = self._pending(proposal_id)
         proposal.status = "approved"
+        self._persist(proposal)
         self.ledger.log(proposal_id, "dream_approved", self.actor, details={"type": proposal.type})
         if proposal.type == "domain":
             for memory_id in proposal.derivedFrom:
@@ -102,6 +123,7 @@ class DreamingService:
     def reject(self, proposal_id, reason=None):
         proposal = self._pending(proposal_id)
         proposal.status = "rejected"
+        self._persist(proposal)
         self.ledger.log(proposal_id, "dream_rejected", self.actor,
                         details={"type": proposal.type, "reason": reason})
 

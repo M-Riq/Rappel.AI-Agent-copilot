@@ -266,10 +266,25 @@ def construire_prompt(role: str, consignes: str, donnees: dict, note: str = "") 
     # Garde-fou : jamais de données volumineuses ni de secret de l'environnement dans un prompt.
     from rappel.securite import borner, masquer_secrets
 
-    texte = json.dumps(borner(donnees), ensure_ascii=False)
+    def masquer_structure(valeur):
+        if isinstance(valeur, str):
+            return masquer_secrets(valeur)
+        if isinstance(valeur, list):
+            return [masquer_structure(element) for element in valeur]
+        if isinstance(valeur, dict):
+            return {cle: masquer_structure(element) for cle, element in valeur.items()}
+        return valeur
+
+    texte = json.dumps(masquer_structure(borner(donnees)), ensure_ascii=False)
     if len(texte) > LONGUEUR_MAX_DONNEES_PROMPT:
-        texte = json.dumps(borner(donnees, longueur_texte=500, elements=10), ensure_ascii=False)
-    return masquer_secrets(f"Role: {role}. {consignes}\n{note}{MARQUEUR_DONNEES}{texte}")
+        texte = json.dumps(
+            masquer_structure(borner(donnees, longueur_texte=500, elements=10)),
+            ensure_ascii=False,
+        )
+    return (
+        f"Role: {role}. {masquer_secrets(consignes)}\n"
+        f"{masquer_secrets(note)}{MARQUEUR_DONNEES}{texte}"
+    )
 
 
 def apercu(texte: str, longueur: int = 160) -> str:
@@ -757,6 +772,7 @@ def creer_graphe_sql(
                 preuves_sql=preuves_sql,
                 hypotheses=etat["hypotheses"],
                 composants=[composant(etat["contexte"])],
+                contexte=resume_contexte(etat["contexte"]),
             )
         else:
             memoire.ecrire(enregistrement)

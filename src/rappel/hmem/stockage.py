@@ -56,6 +56,10 @@ class StockageSQLite:
                     id TEXT PRIMARY KEY,
                     donnees TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS hmem_propositions (
+                    id TEXT PRIMARY KEY,
+                    donnees TEXT NOT NULL
+                );
             """)
         except (OSError, sqlite3.Error) as erreur:
             raise RuntimeError(MESSAGE_STOCKAGE) from erreur
@@ -197,7 +201,7 @@ class MemoryStoreService:
             "domain": donnees.get("domain") or domaine(contenu, tags, type_memoire),
             "namespace": donnees.get("namespace") or namespace(domaine(contenu, tags, type_memoire), type_memoire),
             "entities": donnees.get("entities") or entites(contenu),
-            "relatedTo": [], "derivedFrom": list(donnees.get("derivedFrom", [])),
+            "relatedTo": [], "derivedFrom": list(donnees.get("derivedFrom") or []),
         })
         avant_relations = {
             autre.id: list(autre.relatedTo) for autre in self.all()

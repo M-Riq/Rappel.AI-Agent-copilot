@@ -9,7 +9,7 @@ ORIGINES = frozenset({
     "chat_message", "user_correction", "file_save", "file_open", "file_edit",
     "model_response", "plan_completion", "document", "manual", "dream", "sleep_synthesis",
     "chat", "import", "web", "decision", "curiosity", "goal_run", "user_explicit",
-    "inference", "plan_run", "mission", "swarm_run", "tool", "brain",
+    "inference", "plan_run", "mission", "swarm_run", "tool", "brain", "migration",
 })
 ACTIONS_AUDIT = frozenset({
     "create", "read", "update", "delete", "feedback", "promote", "demote", "merge",

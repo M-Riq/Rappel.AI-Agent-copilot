@@ -79,14 +79,31 @@ class MemoireHMEM:
         return [item for _, item in memorises]
 
     def chercher(self, signature):
-        return self._chercher(signature)
+        souvenirs = self._chercher(signature)
+        if souvenirs:
+            return souvenirs
+        exacts = [
+            mapped for memory in self.hmem.store.all()
+            if self._valeur(memory, "signature") == signature
+            and (mapped := self._vers_enregistrement(memory)) is not None
+        ]
+        if exacts:
+            self._last_memories = [
+                memory for memory in self.hmem.store.all()
+                if self._valeur(memory, "signature") == signature
+            ]
+            self.last_search_trace = {
+                "retrievalReason": "compatibilité du protocole : correspondance exacte de signature",
+                "strategy": "minimal", "scores": {}, "context": "", "retrieved": [],
+            }
+        return exacts
 
     def chercher_contexte(self, signature, contexte):
         composant = ""
         schema = ""
         logs = ""
         if contexte is not None:
-            composant = getattr(contexte, "incident_id", "")
+            composant = signature.partition(":")[2] or signature
             schema_obj = getattr(contexte, "schema", None)
             if schema_obj is not None:
                 schema = " ".join([*getattr(schema_obj, "attendu", []), *getattr(schema_obj, "observe", [])])
@@ -113,7 +130,7 @@ class MemoireHMEM:
 
     def ecrire_incident(
         self, enregistrement, *, incident_id=None, cause=None, confiance=0.7,
-        preuves_sql=None, hypotheses=None, composants=None,
+        preuves_sql=None, hypotheses=None, composants=None, contexte=None,
     ):
         record = EnregistrementMemoire.model_validate(
             enregistrement.model_dump() if hasattr(enregistrement, "model_dump") else enregistrement
@@ -139,16 +156,26 @@ class MemoireHMEM:
         summary = {
             "incident_id": incident_id, "signature": record.signature, "cause": cause,
             "correctif": record.correctif_essaye, "resultat": record.resultat,
-            "date": record.date, "preuves_sql": preuves_sql,
+            "date": record.date, "preuves_sql_ids": [p.get("id", "") for p in preuves_sql],
+            "contexte": contexte or {},
         }
         contenu = (
             f"Incident {incident_id}, signature {record.signature}. Cause confirmée : {cause}. "
             f"Correctif : {record.correctif_essaye}. "
-            + " ".join(f"Preuve {p.get('id', '')}: {p.get('sql', '')}" for p in preuves_sql)
+            + json.dumps(contexte or {}, ensure_ascii=False, sort_keys=True)
             + "\n" + json.dumps(summary, ensure_ascii=False, sort_keys=True)
         )
         identifiant = f"enquete:{incident_id}"
         exists = next((m for m in self.hmem.store.all() if m.source == identifiant), None)
+        entites_contexte = []
+        if isinstance(contexte, dict):
+            entites_contexte.extend(contexte.get("schema_attendu", []))
+            entites_contexte.extend(contexte.get("schema_observe", []))
+            entites_contexte.extend(
+                log.get("template", "") for log in contexte.get("logs_principaux", [])
+                if isinstance(log, dict)
+            )
+        entites_finales = list(dict.fromkeys([*(composants or []), *entites_contexte]))[:10]
         if exists:
             return self.hmem.store.update(exists.id, {
                 "content": contenu, "confidence": confiance, "tags": list(dict.fromkeys(
@@ -157,7 +184,7 @@ class MemoireHMEM:
                     "origin": "decision", "learnedAt": self.hmem.clock(), "label": "cause d'incident confirmée par SQL",
                     "refs": refs,
                 },
-                "entities": list(dict.fromkeys([*exists.entities, *(composants or [])]))[:10],
+                "entities": list(dict.fromkeys([*exists.entities, *entites_finales]))[:10],
             })
         return self.hmem.add({
             "content": contenu, "type": "factual", "layer": "long_term",
@@ -167,7 +194,7 @@ class MemoireHMEM:
                 "origin": "decision", "learnedAt": self.hmem.clock(),
                 "label": "cause d'incident confirmée par requête SQL exécutée", "refs": refs,
             },
-            "entities": list(composants or [])[:10],
+            "entities": entites_finales,
         })
 
     def hypotheses_refutees(self, signature):
