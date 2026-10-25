@@ -10,7 +10,10 @@ from rappel.enquete.protocoles import lire_donnees
 
 @pytest.fixture(scope="module")
 def rapport():
-    return recette.evaluer(repetitions=5)
+    # Mode memoire fixe : le resultat ne doit pas dependre du .env local (MEMOIRE_PROVIDER=hmem par exemple).
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("MEMOIRE_PROVIDER", "json")
+        yield recette.evaluer(repetitions=5)
 
 
 def test_mode_fake_aucun_echec(rapport):
@@ -20,7 +23,7 @@ def test_mode_fake_aucun_echec(rapport):
 
 
 def test_non_mesures_attendues_listees(rapport):
-    # En mode fake/fichier : A14 n'est pas mesurable ; la partie reelle de A3, A7, A14, A15 non plus.
+    # En mode fake/fichier/json : A14 n'est pas mesurable ; la partie reelle de A3, A7, A14, A15 non plus.
     assert rapport["non_mesures"] == ["A14"]
     assert rapport["parties_reelles_non_mesurees"] == ["A3", "A7", "A14", "A15"]
     raisons = {element["case"]: element["raison_reel"] for element in rapport["cases"]}
@@ -28,6 +31,15 @@ def test_non_mesures_attendues_listees(rapport):
     assert raisons["A7"] == "service réel requis : Postgres"
     assert raisons["A15"] == raisons["A14"] == "service réel requis : Nightshift"
     assert all(element["simule"] for element in rapport["cases"] if element["case"] in {"A3", "A7", "A14", "A15"})
+
+
+def test_avec_hmem_a7_mesuree_en_reel(monkeypatch, tmp_path):
+    # Avec H-MEM, la memoire persistante est un fichier SQLite local : la partie reelle de A7 est mesuree.
+    monkeypatch.setenv("MEMOIRE_PROVIDER", "hmem")
+    monkeypatch.setenv("HMEM_PATH", str(tmp_path / "hmem.sqlite"))
+    resultat = recette.evaluer(repetitions=5)
+    assert resultat["echecs"] == []
+    assert resultat["parties_reelles_non_mesurees"] == ["A3", "A14", "A15"]
 
 
 class ConclusionFausse(LLMFaux):
