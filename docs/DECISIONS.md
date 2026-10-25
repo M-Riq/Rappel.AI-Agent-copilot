@@ -35,4 +35,5 @@ Règles :
 | 23 oct. 2026 | Plafond de 3 enquêtes par session dans l'interface | limiter les appels au modèle pendant la démo |
 | 23 oct. 2026 | Langfuse optionnel, désactivé sans clés | aucun paquet supplémentaire imposé |
 | 24 oct. 2026 | Fusion de `naomy/complement-modules` dans `main` sans relecture de Juan (pipeline_demo, ingestion, action) ni d'Yvan (ui, Langfuse) ; relecture à faire après la fusion | 626 tests passent en mode simulé ; débloquer l'intégration Meterless. Décision : Riq |
-
+| 25 oct. 2026 | Exception au gel pour H-MEM ; fusion seulement si tous les tests et la conformité sont verts | Intégration locale Python/SQLite ; aucun déploiement ni service cloud |
+| 25 oct. 2026 | PostgreSQL conservé en backend optionnel | H-MEM remplace la mémoire pour les nouveaux essais, mais la migration Postgres n'est pas encore validée contre un vrai Postgres et ses références/tests restent actifs |

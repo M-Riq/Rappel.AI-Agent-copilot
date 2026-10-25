@@ -301,7 +301,7 @@ class MemoireAvecSecours:
 
 
 def mode_memoire(memoire):
-    """json, postgres ou fallback-json selon le backend effectivement utilise."""
+    """json, postgres, hmem ou fallback-json selon le backend effectivement utilise."""
     backend = getattr(memoire, "backend", memoire)
     if getattr(backend, "mode", None):
         return backend.mode
@@ -309,6 +309,8 @@ def mode_memoire(memoire):
         return "json"
     if isinstance(backend, MemoirePostgres):
         return "postgres"
+    if type(backend).__name__ == "MemoireHMEM":
+        return "hmem"
     return type(backend).__name__
 
 
@@ -326,6 +328,10 @@ def _memoire():
     configuration = charger()
     if configuration.memoire_provider == "json":
         return MemoireJSON(configuration.memoire_json_path)
+    if configuration.memoire_provider == "hmem":
+        from rappel.interfaces.memoire_hmem import MemoireHMEM
+
+        return MemoireHMEM(configuration.hmem_path)
     return MemoireAvecSecours(MemoirePostgres(configuration.database_url),
                               MemoireJSON(configuration.memoire_json_path))
 
@@ -335,7 +341,7 @@ def chercher(signature):
 
 
 def backend():
-    """Backend choisi par MEMOIRE_PROVIDER (json ou postgres)."""
+    """Backend choisi par MEMOIRE_PROVIDER (json, postgres ou hmem)."""
     return _memoire()
 
 

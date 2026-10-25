@@ -1,7 +1,15 @@
+import json
 import re
 import subprocess
 
 from rappel.config import RACINE
+from rappel.securite import masquer_secrets
+
+
+def test_masquage_ne_casse_pas_les_litteraux_json(monkeypatch):
+    monkeypatch.setenv("EXEMPLE_SECRET", "true")
+    texte = masquer_secrets('{"actif": true, "libelle": "true"}')
+    assert json.loads(texte) == {"actif": True, "libelle": "true"}
 
 
 def test_aucun_secret_dans_les_fichiers_suivis():

@@ -140,6 +140,27 @@ def test_script_sequence(memoire, action_reelle, tmp_path, capsys):
     assert [resume["scenario"] for resume in resumes] == ["p1", "p2", "p3"]
 
 
+def test_script_sequence_hmem_neuve_reutilise_p1_sans_stockage_persistant(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_PROVIDER", "fake")
+    monkeypatch.setenv("SOURCE_PROVIDER", "fichier")
+    monkeypatch.setenv("MEMOIRE_PROVIDER", "hmem")
+    monkeypatch.setenv("HMEM_PATH", str(tmp_path / "memoire-persistante.sqlite"))
+    monkeypatch.setenv("BOUCLE_JOURNAL_PATH", str(tmp_path / "journal.jsonl"))
+    sortie = tmp_path / "boucle-hmem.json"
+
+    assert boucle_agents.main([
+        "--scenario", "p1,p2,p3", "--memoire-neuve", "--json", str(sortie),
+    ]) == 0
+
+    resumes = json.loads(sortie.read_text(encoding="utf-8"))["cycles"]
+    p1, p2, p3 = resumes
+    assert p1["memoire"]["ecrit"] is True
+    assert p2["memoire"]["souvenirs_avant"] >= 1
+    assert p2["enquete"]["nb_appels_llm"] < p1["enquete"]["nb_appels_llm"]
+    assert p3["enquete"]["abstention"] is True
+    assert not (tmp_path / "memoire-persistante.sqlite").exists()
+
+
 def test_script_refuse_reel_sans_confirmer(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_PROVIDER", "meterless")
     assert boucle_agents.main(["--scenario", "p1", "--json", str(tmp_path / "b.json")]) == 2

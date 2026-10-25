@@ -143,7 +143,19 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
     cases = []
     with TemporaryDirectory() as dossier:
         dossier = Path(dossier)
-        partagee = MemoireEnquete.json(dossier / "partagee.json")
+        memoires_locale = []
+
+        def memoire_locale(nom):
+            if configuration.memoire_provider == "hmem":
+                from rappel.interfaces.memoire_hmem import MemoireHMEM
+
+                backend = MemoireHMEM(dossier / f"{nom}.sqlite")
+                memoire = MemoireEnquete(backend)
+                memoires_locale.append(memoire)
+                return memoire
+            return MemoireEnquete.json(dossier / f"{nom}.json")
+
+        partagee = memoire_locale("partagee")
 
         def lancer(nom, memoire, **options):
             return enqueter(charger_contexte(nom), memoire, fabrique(), AbstentionSeuil(), mode_preuves="sql", **options)
@@ -151,8 +163,8 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
         p1 = lancer("p1", partagee)
         souvenirs_p1 = partagee.chercher(charger_contexte("p1").signature)
         p2 = lancer("p2", partagee)
-        p3 = lancer("p3", MemoireEnquete.json(dossier / "vide.json"))
-        plafond = lancer("p1", MemoireEnquete.json(dossier / "plafond.json"), max_tours=PLAFOND_ESSAI)
+        p3 = lancer("p3", memoire_locale("vide"))
+        plafond = lancer("p1", memoire_locale("plafond"), max_tours=PLAFOND_ESSAI)
         retenue_p1 = retenue(p1)
         contraire = None
         if retenue_p1 is not None:
@@ -167,10 +179,15 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
         from rappel.enquete.war_room import configuration as configuration_war_room
 
         plafond_appels = configuration_war_room(active=True).max_appels_llm
-        sans_debat = lancer("p1", MemoireEnquete.json(dossier / "sans_debat.json"), war_room_active=False)
-        avec_debat = lancer("p1", MemoireEnquete.json(dossier / "avec_debat.json"), war_room_active=True,
+        sans_debat = lancer("p1", memoire_locale("sans_debat"), war_room_active=False)
+        avec_debat = lancer("p1", memoire_locale("avec_debat"), war_room_active=True,
                             war_room_max_tours=PLAFOND_WAR_ROOM, war_room_max_appels_llm=plafond_appels)
         war_room = cases_war_room(sans_debat, avec_debat, plafond_appels, llm_reel)
+        for memoire_locale_instance in memoires_locale:
+            memoire_backend = getattr(memoire_locale_instance, "backend", None)
+            moteur_hmem = getattr(memoire_backend, "hmem", None)
+            if moteur_hmem is not None:
+                moteur_hmem.close()
 
     # A1-A2 : hypotheses et preuves citees.
     cases.append(case("A1", verdict(len(p1.hypotheses) >= 2 and all(
@@ -241,6 +258,10 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
     a7 = bool(souvenirs_p1) and bool(souvenirs_p1[-1].hypotheses_refutees)
     statut_a7 = verdict(a7)
     reel_a7, raison_a7 = NON_MESURE, "service réel requis : Postgres"
+    simule_a7 = True
+    if configuration.memoire_provider == "hmem":
+        reel_a7, raison_a7 = verdict(bool(souvenirs_p1)), "H-MEM SQLite local, fichier temporaire de recette"
+        simule_a7 = False
     if memoire_reelle is not None and souvenirs_p1:
         try:
             memoire_reelle.ecrire(souvenirs_p1[-1])
@@ -252,12 +273,17 @@ def evaluer(configuration: Configuration | None = None, fabrique_llm=None, repet
                 raison_a7 = f"Postgres injoignable (mode {mode}) : service réel requis"
         except Exception:
             reel_a7, raison_a7 = ECHOUE, "écriture ou lecture Postgres impossible"
-    cases.append(case("A7", statut_a7, "mémoire JSON temporaire de la recette", simule=True,
+    cases.append(case("A7", statut_a7, "mémoire H-MEM temporaire" if configuration.memoire_provider == "hmem"
+                      else "mémoire JSON temporaire de la recette", simule=simule_a7,
                       reel=reel_a7, raison_reel=raison_a7))
 
     # A8 : P2 retrouve P1 et ne reteste rien de refute.
     refutees = {cle_texte(texte) for souvenir in souvenirs_p1 for texte in souvenir.hypotheses_refutees}
-    retrouve = any(evenement.texte.startswith("incident similaire") for evenement in p2.evenements)
+    trace_p2 = getattr(getattr(partagee, "backend", None), "last_search_trace", None)
+    if configuration.memoire_provider == "hmem":
+        retrouve = bool(trace_p2 and trace_p2.get("retrieved"))
+    else:
+        retrouve = any(evenement.texte.startswith("incident similaire") for evenement in p2.evenements)
     reteste = [hypothese.texte for hypothese in p2.hypotheses if cle_texte(hypothese.texte) in refutees]
     cases.append(case("A8", verdict(retrouve and bool(refutees) and not reteste),
                       f"{p2.metriques.nb_ecartees_par_memoire} écartée(s) par la mémoire ; retestées : {reteste or 'aucune'}"))
