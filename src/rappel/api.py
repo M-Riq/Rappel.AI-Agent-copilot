@@ -571,12 +571,37 @@ def creer_app(
         for souvenir in souvenirs:
             textes = refutations.setdefault(souvenir.signature, [])
             textes.extend(texte for texte in souvenir.hypotheses_refutees if texte not in textes)
-        return jsonable_encoder({
+        reponse = {
             "souvenirs": [souvenir.model_dump(mode="json") for souvenir in souvenirs],
             "refutations_par_signature": refutations,
             # reussi, echoue ou non_confirme (souvenir provisoire, action non encore confirmée).
             "statuts_resultat": statuts,
-        })
+        }
+        trace = getattr(getattr(courante, "backend", None), "last_search_trace", None)
+        if trace:
+            reponse["trace_recherche"] = trace
+        return jsonable_encoder(reponse)
+
+    @application.get("/memoire/audit")
+    def lire_audit_memoire(memory_id: str | None = None):
+        try:
+            with verrou_execution:
+                courante = memoire_courante()
+                ledger = getattr(getattr(courante, "backend", None), "ledger", None)
+                if ledger is None:
+                    raise HTTPException(404, "Le registre d'audit H-MEM n'est pas configuré.")
+                entrees = ledger.history(memory_id) if memory_id else ledger.all()
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(500, "Lecture de l'audit H-MEM impossible.") from None
+        from rappel.securite import masquer_secrets
+
+        resultat = []
+        for entree in entrees:
+            texte = masquer_secrets(json.dumps(entree.__dict__, ensure_ascii=False))
+            resultat.append(json.loads(texte))
+        return {"entrees": resultat}
 
     @application.post("/memoire/reinitialiser")
     def reinitialiser_memoire(corps: ReinitialisationMemoire):

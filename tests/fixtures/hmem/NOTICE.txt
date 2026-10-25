@@ -1,0 +1,7 @@
+Les vecteurs de conformité sont reproduits depuis Meterless/Meterless,
+engines/hmem/conformance/vectors/vectors.json, commit
+85c5d41493c6ae2ceb06ad76144932309cfda3dd (SHA du blob : 776b6b6e808e82d25b110db4029b3d24f5eb7dcb).
+
+Copyright 2026 Meterless. Vecteurs sous licence MIT ; copie de la licence dans
+LICENSE.txt. Les autres contenus et l'implémentation Python de Rappel ne sont pas
+couverts par cette attribution.

@@ -24,6 +24,7 @@ class Configuration:
     zetaris_org_id: str = "1"
     memoire_provider: str = "json"
     memoire_json_path: str = "data/memoire.json"
+    hmem_path: str = "data/hmem.sqlite"
     database_url: str = field(
         default="postgresql://" + "rappel:" + "rappel@localhost:5432/rappel", repr=False
     )
@@ -61,7 +62,7 @@ class Configuration:
         for valeur, choix in (
             (self.llm_provider, ("fake", "meterless")),
             (self.source_provider, ("fichier", "zetaris")),
-            (self.memoire_provider, ("json", "postgres")),
+            (self.memoire_provider, ("json", "postgres", "hmem")),
         ):
             if valeur not in choix:
                 raise ValueError(f"Mode inconnu ; valeurs autorisées : {', '.join(choix)}")

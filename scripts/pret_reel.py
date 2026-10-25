@@ -1,10 +1,14 @@
 """Go / no-go avant le branchement réel : rapport VERT / ORANGE / ROUGE, lecture seule par défaut.
 
-Ordre : machine, Nightshift, clé NVIDIA (étape humaine), voies et modèle Nemotron, Zetaris, Postgres,
-Langfuse (optionnel), .env hors de git, scan des secrets, tests rapides. Chaque point ROUGE donne sa
-cause probable et la commande exacte pour corriger. --confirmer autorise UN appel facturé par voie
-(contrôle « nemotron » du modèle renvoyé) ; sans lui, ce point reste ORANGE. Rapport sans secret :
-data/pret_reel.json. Code de sortie 0 seulement si tout ce qui est requis est VERT.
+Ordre : machine, Nightshift, clé NVIDIA (étape humaine), voies et modèle Nemotron, Zetaris, mémoire
+(H-MEM ou Postgres selon MEMOIRE_PROVIDER), Langfuse (optionnel), .env hors de git, scan des secrets,
+tests rapides. Chaque point ROUGE donne sa cause probable et la commande exacte pour corriger.
+--confirmer autorise UN appel facturé par voie (contrôle « nemotron » du modèle renvoyé) ; sans lui,
+ce point reste ORANGE. Rapport sans secret : data/pret_reel.json. Code de sortie 0 seulement si tout
+ce qui est requis est VERT.
+
+Avec MEMOIRE_PROVIDER=hmem, la mémoire est un fichier SQLite local : Postgres n'est pas contrôlé et
+Docker (qui ne sert qu'à Postgres) n'est plus requis.
 
   python scripts/pret_reel.py [--confirmer] [--sans-tests]
 """
@@ -14,6 +18,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -27,6 +32,7 @@ from rappel.config import charger
 
 VERT, ORANGE, ROUGE = "VERT", "ORANGE", "ROUGE"
 TESTS_RAPIDES = ("tests/test_run_sql.py", "tests/test_interfaces.py", "tests/test_contrats.py")
+HMEM_PATH_DEFAUT = "data/hmem.sqlite"
 
 
 def point(nom, statut, requis=True, cause="", commande=""):
@@ -42,6 +48,20 @@ def verifier_machine():
     return [point(f"machine : {ligne['case']}", VERT if ligne["statut"] == REUSSI else (ORANGE if ligne["statut"] == NON_MESURE else ROUGE),
                   cause=ligne["detail"], commande="" if ligne["statut"] == REUSSI else commandes.get(ligne["case"], ""))
             for ligne in verifier_systeme()]
+
+
+def ajuster_docker(points, configuration):
+    """Avec H-MEM, Docker ne sert plus (il ne lançait que Postgres) : point gardé à titre indicatif, non requis."""
+    if configuration.memoire_provider != "hmem":
+        return points
+    ajustes = []
+    for element in points:
+        if element["point"] == "machine : Docker" and element["statut"] != VERT:
+            element = {**element, "statut": ORANGE, "requis": False,
+                       "cause": element["cause"] + " ; non requis avec MEMOIRE_PROVIDER=hmem (Docker ne sert qu'à Postgres)",
+                       "commande": "-"}
+        ajustes.append(element)
+    return ajustes
 
 
 def verifier_nightshift(configuration):
@@ -110,18 +130,56 @@ def verifier_zetaris(configuration):
     return point("Zetaris", VERT, cause="SELECT 1, tables et dialecte vérifiés")
 
 
+def chemin_hmem(configuration) -> Path:
+    brut = getattr(configuration, "hmem_path", None) or os.environ.get("HMEM_PATH") or HMEM_PATH_DEFAUT
+    chemin = Path(brut)
+    return chemin if chemin.is_absolute() else RACINE / chemin
+
+
+def verifier_hmem(configuration):
+    """Fichier SQLite H-MEM accessible en écriture : aller-retour dans une transaction annulée (rien n'est gardé)."""
+    chemin = chemin_hmem(configuration)
+    commande = "vérifier HMEM_PATH dans .env et les droits d'écriture du dossier (data/ par défaut)"
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        connexion = sqlite3.connect(chemin, timeout=5)
+    except (OSError, sqlite3.Error) as erreur:
+        return point("Mémoire H-MEM", ROUGE, cause=f"fichier {chemin.name} inaccessible ({type(erreur).__name__})",
+                     commande=commande)
+    try:
+        connexion.execute("BEGIN IMMEDIATE")
+        connexion.execute("CREATE TEMP TABLE IF NOT EXISTS _pret_reel (valeur TEXT)")
+        connexion.execute("INSERT INTO _pret_reel VALUES ('aller-retour')")
+        relu = connexion.execute("SELECT valeur FROM _pret_reel").fetchone()
+        connexion.rollback()
+    except sqlite3.Error as erreur:
+        return point("Mémoire H-MEM", ROUGE, cause=f"écriture impossible dans {chemin.name} ({type(erreur).__name__})",
+                     commande=commande)
+    finally:
+        connexion.close()
+    if not relu or relu[0] != "aller-retour":
+        return point("Mémoire H-MEM", ROUGE, cause="aller-retour SQLite incohérent", commande=commande)
+    return point("Mémoire H-MEM", VERT, cause=f"{chemin.name} accessible en écriture (aller-retour annulé)")
+
+
 def verifier_postgres(configuration):
     from scripts.verifier_machine_demo import _executer_script
 
     if not os.environ.get("DATABASE_URL"):
         return point("Postgres", ROUGE, cause="DATABASE_URL non renseignée (repli : mémoire JSON)",
-                     commande="docker compose up -d postgres puis DATABASE_URL dans .env")
+                     commande="docker compose up -d postgres puis DATABASE_URL dans .env, ou MEMOIRE_PROVIDER=hmem")
     from scripts import check_postgres
 
     code, detail = _executer_script(check_postgres.main)
     if code == 0:
         return point("Postgres", VERT, cause=detail)
     return point("Postgres", ROUGE, cause=detail, commande="docker compose up -d postgres puis python scripts/check_postgres.py")
+
+
+def verifier_memoire(configuration):
+    if configuration.memoire_provider == "hmem":
+        return verifier_hmem(configuration)
+    return verifier_postgres(configuration)
 
 
 def verifier_langfuse():
@@ -162,7 +220,7 @@ def verifier_tests():
 
 def evaluer(confirmer=False, machine=verifier_machine, tests=verifier_tests, scan=verifier_scan, fabrique_llm=None):
     configuration = charger()
-    points = list(machine())
+    points = ajuster_docker(list(machine()), configuration)
     nightshift, sonde = verifier_nightshift(configuration)
     points.append(nightshift)
     points.append(point("clé NVIDIA côté Nightshift", ORANGE, requis=False,
@@ -174,7 +232,7 @@ def evaluer(confirmer=False, machine=verifier_machine, tests=verifier_tests, sca
         points.append(point("voies et modèle Nemotron", ROUGE, cause="Nightshift non joignable : voies non vérifiables",
                             commande="corriger le point Nightshift d'abord"))
     points.append(verifier_zetaris(configuration))
-    points.append(verifier_postgres(configuration))
+    points.append(verifier_memoire(configuration))
     points.append(verifier_langfuse())
     points.append(verifier_env_git())
     points.append(scan())

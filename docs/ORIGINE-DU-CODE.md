@@ -100,7 +100,16 @@ mémoire JSON, pipeline de démo) ; rien n'a été exécuté contre Nightshift, 
 | `3c26f5f` | 24/10 09:30 | Recette reelle en une commande |
 | commit suivant | 24/10 | Documentation boucle, war room, graphe |
 
-## 7. Ce qui n'a pas été repris
+## 7. Portage H-MEM (25 octobre 2026)
+
+`src/rappel/hmem/` est un portage Python de l'architecture et des comportements
+exécutables de Meterless H-MEM. Les vecteurs de conformité versionnés sont repris
+de `Meterless/Meterless`, commit `85c5d41493c6ae2ceb06ad76144932309cfda3dd`,
+avec attribution et empreinte de blob dans `tests/fixtures/hmem/NOTICE.txt`.
+les vecteurs repris sont sous licence MIT (copie dans `tests/fixtures/hmem/LICENSE.txt`).
+Le moteur Python est original ; il n'embarque pas le runtime TypeScript de la référence.
+
+## 8. Ce qui n'a pas été repris
 
 - Adaptateurs NVIDIA et Claude, secours entre fournisseurs, variables `NIGHTSHIFT_*` et
   `RUN_SQL_BACKEND` : l'équipe passe uniquement par Meterless et par sa configuration.
