@@ -1,6 +1,48 @@
 """Logique pure de l'interface (aucun import de Streamlit ni de réseau) : testable hors interface."""
 
+
+def filtrer_lignes(lignes: list[dict], recherche: str = "", selections: dict | None = None) -> list[dict]:
+    termes = recherche.casefold().split()
+    selections = selections or {}
+    return [
+        ligne for ligne in lignes
+        if all(not valeurs or ligne.get(champ) in valeurs for champ, valeurs in selections.items())
+        and all(terme in " ".join(str(valeur) for valeur in ligne.values()).casefold() for terme in termes)
+    ]
+
+
+def paginer(lignes: list[dict], numero: int, taille: int) -> tuple[list[dict], int, int]:
+    taille = max(1, taille)
+    total = max(1, (len(lignes) + taille - 1) // taille)
+    numero = min(max(1, numero), total)
+    debut = (numero - 1) * taille
+    return lignes[debut:debut + taille], numero, total
+
+
+def trier_lignes(lignes: list[dict], champ: str | None, decroissant: bool = False) -> list[dict]:
+    if not champ:
+        return list(lignes)
+
+    def cle_tri(ligne):
+        valeur = ligne.get(champ)
+        if isinstance(valeur, (int, float)):
+            return 0, valeur
+        return 1, str(valeur or "").casefold()
+
+    return sorted(lignes, key=cle_tri, reverse=decroissant)
+
+
+def libelle_incident(identifiant: str, incidents: list[str], scenarios: dict[str, str]) -> str:
+    if identifiant not in incidents:
+        return identifiant
+    numero = incidents.index(identifiant) + 1
+    scenario = scenarios.get(identifiant)
+    return f"{scenario.upper()} · Enquête {numero}" if scenario else f"Incident {numero}"
+
+
 REJEUX_MAX = 3
+PARCOURS_MAX = 3
+SCENARIOS_PAR_PARCOURS = ("p1", "p2", "p3")
 INTERVALLE_RAFRAICHISSEMENT_S = 2
 
 MESSAGE_API_COUPEE = (
@@ -128,12 +170,37 @@ def mention_simulation(incident: dict | None) -> str | None:
     return "Mode simulé : " + " ; ".join(parties) if parties else None
 
 
+def style_incident(incident: dict | None) -> tuple[str, str, str]:
+    incident = incident or {}
+    statut = incident.get("statut")
+    if statut == "termine" and (incident.get("decision_abstention") or {}).get("abstient"):
+        return "Abstention", "orange", ":material/pan_tool:"
+    return {
+        "en_cours": ("Enquête en cours", "blue", ":material/hourglass_top:"),
+        "termine": ("Enquête terminée", "green", ":material/task_alt:"),
+        "erreur": ("Enquête interrompue", "red", ":material/error:"),
+    }.get(statut, ("État non confirmé", "gray", ":material/help:"))
+
+
+def libelle_decision(incident: dict, decision_locale: dict | None = None) -> str:
+    if decision_locale and not decision_locale.get("confirmee"):
+        return "Non confirmée"
+    decision = incident.get("decision_humaine") or (decision_locale or {}).get("decision")
+    if decision:
+        return {"appliquer": "Application demandée", "refuser": "Correctif refusé"}.get(decision, "Non reconnue")
+    if incident.get("statut") != "termine":
+        return "Indisponible"
+    if (incident.get("decision_abstention") or {}).get("abstient") or not incident.get("correctif"):
+        return "Sans objet"
+    return "En attente"
+
+
 def resume_incident(incident: dict | None) -> str:
     if not isinstance(incident, dict):
         return "Aucun incident."
     statut = incident.get("statut", "?")
     if statut != "termine":
-        return f"Enquête {statut}."
+        return f"{style_incident(incident)[0]}."
     abstention = incident.get("decision_abstention") or {}
     if abstention.get("abstient"):
         manque = ", ".join(abstention.get("manque") or []) or "non précisé"
@@ -143,23 +210,43 @@ def resume_incident(incident: dict | None) -> str:
     return f"Correctif proposé (risque : {risque})." if correctif else "Enquête terminée sans correctif."
 
 
+def total_tokens(metriques: dict) -> int | None:
+    entree = metriques.get("nb_tokens_entree")
+    sortie = metriques.get("nb_tokens_sortie")
+    return None if entree is None or sortie is None else entree + sortie
+
+
+def lignes_metriques(incident: dict, evenements: list[dict]) -> list[dict]:
+    metriques = incident.get("metriques") or {}
+    mesures = [
+        ("Dernière étape reçue", derniere_etape(evenements)),
+        ("Événements d'enquête", metriques.get("nb_evenements")),
+        ("Tours d'enquête", metriques.get("nb_tours")),
+        ("Appels LLM", metriques.get("nb_appels_llm")),
+        ("Appels voie rapide", metriques.get("nb_appels_rapide")),
+        ("Appels voie profonde", metriques.get("nb_appels_profonde")),
+        ("Tokens", total_tokens(metriques)),
+        ("Durée (ms, indicative)", metriques.get("duree_ms")),
+        ("Requêtes SQL", metriques.get("nb_requetes_sql")),
+        ("Hypothèses écartées grâce à la mémoire", metriques.get("nb_ecartees_par_memoire")),
+    ]
+    return [{"mesure": nom, "valeur": "inconnue" if valeur is None else valeur} for nom, valeur in mesures]
+
+
 def lignes_compteur(comparaison: dict) -> list[dict]:
     """Lignes du compteur P1 contre P2 ; la durée est indiquée comme indicative."""
     metriques = comparaison.get("metriques", {})
     a, b = metriques.get("a", {}), metriques.get("b", {})
     reductions = comparaison.get("reductions_pct", {})
 
-    def tokens(m):
-        if m.get("nb_tokens_entree") is None or m.get("nb_tokens_sortie") is None:
-            return None
-        return m["nb_tokens_entree"] + m["nb_tokens_sortie"]
-
     definitions = [
         ("Événements", a.get("nb_evenements"), b.get("nb_evenements"), "evenements"),
         ("Hypothèses testées", a.get("nb_hypotheses_testees"), b.get("nb_hypotheses_testees"), "hypotheses_testees"),
         ("Appels LLM", a.get("nb_appels_llm"), b.get("nb_appels_llm"), "appels_llm"),
-        ("Tokens", tokens(a), tokens(b), "tokens"),
+        ("Tokens", total_tokens(a), total_tokens(b), "tokens"),
         ("Durée (ms, indicative)", a.get("duree_ms"), b.get("duree_ms"), "duree"),
+        ("Tours d'enquête", a.get("nb_tours"), b.get("nb_tours"), "tours"),
+        ("Requêtes SQL", a.get("nb_requetes_sql"), b.get("nb_requetes_sql"), "requetes_sql"),
     ]
     return [
         {
@@ -184,12 +271,57 @@ def verdict_regle_60pc(comparaison: dict) -> str:
     return texte
 
 
+def signature_incident(graphe: dict, identifiant: str) -> str | None:
+    signatures = {
+        noeud["id"] for noeud in graphe.get("noeuds", [])
+        if noeud.get("type") == "signature" and noeud.get("id", "").startswith("signature:")
+    }
+    for arete in graphe.get("aretes", []):
+        if (arete.get("source") == f"incident:{identifiant}"
+                and arete.get("type") == "a_pour_signature" and arete.get("cible") in signatures):
+            return arete["cible"].removeprefix("signature:")
+    return None
+
+
+def evenements_memoire(evenements: list[dict]) -> list[dict]:
+    return [
+        evenement for evenement in evenements
+        if evenement.get("acteur") == "historien" or (
+            evenement.get("acteur") == "systeme"
+            and evenement.get("type") in ("decision", "rejet")
+            and any(mention in str(evenement.get("texte", "")).casefold() for mention in (
+                "incident similaire", "mémoire", "memoire", "correctif déjà essayé",
+            ))
+        )
+    ]
+
+
+def lignes_souvenirs(memoire: dict, signature: str) -> list[dict]:
+    statuts = memoire.get("statuts_resultat", [])
+    libelles = {"reussi": "réussi", "echoue": "échoué", "non_confirme": "non confirmé"}
+    return [
+        {
+            "date": souvenir.get("date", "inconnue"),
+            "cause": souvenir.get("cause_confirmee", "inconnue"),
+            "correctif essayé": souvenir.get("correctif_essaye", "inconnu"),
+            "résultat": libelles.get(statuts[indice] if indice < len(statuts) else None, "non confirmé"),
+        }
+        for indice, souvenir in enumerate(memoire.get("souvenirs", []))
+        if souvenir.get("signature") == signature
+    ]
+
+
 def peut_rejouer(nb_rejeux: int, maximum: int = REJEUX_MAX) -> bool:
     return nb_rejeux < maximum
 
 
-def identifiant_incident(scenario: str, numero: int) -> str:
-    return f"ui-{scenario}-{numero}"
+def plafond_enquetes(simulation: bool, accord_reel: bool = False) -> int:
+    return PARCOURS_MAX * len(SCENARIOS_PAR_PARCOURS) if simulation or accord_reel else REJEUX_MAX
+
+
+def identifiant_incident(scenario: str, numero: int, session: str | None = None) -> str:
+    suffixe = f"-{session}" if session else ""
+    return f"ui-{scenario}-{numero}{suffixe}"
 
 
 # Graphe de relations (GET /graphe) : affichage Graphviz (DOT) ou tableau, sans dépendance.

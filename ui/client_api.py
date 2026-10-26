@@ -61,5 +61,17 @@ class ClientApi:
     def decision(self, incident_id: str, decision: str) -> dict:
         return self._appel("post", f"/correctifs/{incident_id}/decision", json={"decision": decision})
 
+    def memoire(self, signature: str) -> dict:
+        donnees = self._appel("get", "/memoire", params={"signature": signature})
+        if (
+            not isinstance(donnees, dict)
+            or not isinstance(donnees.get("souvenirs"), list)
+            or not all(isinstance(souvenir, dict) for souvenir in donnees["souvenirs"])
+            or not isinstance(donnees.get("statuts_resultat"), list)
+            or not isinstance(donnees.get("refutations_par_signature"), dict)
+        ):
+            raise ErreurApi("Format de mémoire invalide.")
+        return donnees
+
     def graphe(self, incident_id: str | None = None) -> dict:
         return self._appel("get", "/graphe" if incident_id is None else f"/graphe/{incident_id}")
