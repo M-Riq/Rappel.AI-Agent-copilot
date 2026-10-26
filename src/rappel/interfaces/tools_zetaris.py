@@ -12,6 +12,8 @@ from rappel.config import RACINE, charger
 from rappel.securite import url_service
 
 # Clé du SQL dans le corps et endpoint : ZETARIS_CLE_SQL / ZETARIS_CHEMIN_SQL (scripts/decouvrir_zetaris.py).
+SOURCE_SQL_EDITOR = "SqlEditor"
+LIMITE_LIGNES_REQUETE = 20
 
 RUN_SQL_TOOL = {
     "type": "function",
@@ -196,7 +198,12 @@ def run_sql(sql, *, configuration=None, scenario="p1"):
                 "X-Org-ID": configuration.zetaris_org_id,
                 "X-Request-ID": str(uuid4()),
             },
-            json={configuration.zetaris_cle_sql: sql},
+            json={
+                "queryId": str(uuid4()),
+                configuration.zetaris_cle_sql: sql,
+                "limit": LIMITE_LIGNES_REQUETE,
+                "source": SOURCE_SQL_EDITOR,
+            },
         )
     except ErreurService as erreur:
         if erreur.categorie == "requete" and erreur.detail:
