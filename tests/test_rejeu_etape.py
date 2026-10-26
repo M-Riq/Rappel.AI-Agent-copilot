@@ -72,6 +72,15 @@ class FauxSt:
     def fragment(self, run_every=None):
         return lambda fonction: fonction
 
+    def columns(self, nombre):
+        return [self] * nombre
+
+    def expander(self, *args, **kwargs):
+        return self
+
+    def selectbox(self, libelle, options, index=0, key=None):
+        return list(options)[index]
+
     def slider(self, *args, **kwargs):
         self.appels.append(("slider", args, kwargs))
         return self.etape

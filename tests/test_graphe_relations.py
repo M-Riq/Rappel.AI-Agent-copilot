@@ -144,6 +144,12 @@ class _FauxSt:
     def fragment(self, run_every=None):
         return lambda fonction: fonction
 
+    def columns(self, nombre):
+        return [self] * nombre
+
+    def selectbox(self, libelle, options, index=0, key=None):
+        return list(options)[index]
+
     def __getattr__(self, nom):
         if nom == "graphviz_chart" and not self.avec_graphviz:
             raise AttributeError(nom)
@@ -171,4 +177,4 @@ def test_zone_relations(monkeypatch, tmp_path, avec_graphviz):
     if avec_graphviz:
         assert "graphviz_chart" in noms
     else:
-        assert any(nom == "code" and kwargs.get("language") == "mermaid" for nom, _, kwargs in faux.appels)
+        assert any(nom == "code" and kwargs.get("language") == "dot" for nom, _, kwargs in faux.appels)
