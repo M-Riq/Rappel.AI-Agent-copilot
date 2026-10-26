@@ -93,14 +93,19 @@ class FauxSt:
         self.appels.append(("button", (libelle,), {"key": key, "disabled": disabled}))
         if key in self.clics and not disabled:
             self.clics.remove(key)
+            if options.get("on_click"):
+                options["on_click"](*options.get("args", ()))
             return True
         return False
 
-    def selectbox(self, libelle, options, index=0, key=None):
+    def selectbox(self, libelle, options, index=0, key=None, format_func=None):
         return list(options)[index]
 
     def columns(self, nombre):
         return [self] * nombre
+
+    def expander(self, *args, **kwargs):
+        return self
 
     def __getattr__(self, nom):
         return lambda *args, **kwargs: self.appels.append((nom, args, kwargs))
@@ -125,18 +130,69 @@ def application(tmp_path):
     return api.creer_app(MemoireEnquete.json(tmp_path / "m.json"), executeur_enquete=lambda tache: tache())
 
 
-def test_trois_rejeux_de_suite_puis_plafond(zones, application):
-    faux = FauxSt(clics=["rappel_injecter"] * 4)
+def test_neuf_enquetes_de_suite_puis_plafond(zones, application):
+    faux = FauxSt(clics=["rappel_injecter"] * 10)
+    faux.session_state["rappel_session"] = "test"
     module = zones(faux)
     with TestClient(application) as session:
         client = module.ClientApi("http://testserver", session=session)
-        for _ in range(4):
+        for _ in range(10):
             module.zone_pipeline(client)
-        assert faux.session_state["rappel_incidents"] == ["ui-p1-1", "ui-p1-2", "ui-p1-3"]
-        assert [i["incident_id"] for i in session.get("/incidents").json()] == ["ui-p1-3", "ui-p1-2", "ui-p1-1"]
+        attendus = [f"ui-p1-{numero}-test" for numero in range(1, 10)]
+        assert faux.session_state["rappel_incidents"] == attendus
+        assert [incident["incident_id"] for incident in session.get("/incidents").json()] == attendus[::-1]
     desactives = [options["disabled"] for nom, _, options in faux.appels if nom == "button"]
     assert desactives[-1] is True
-    assert any("Plafond de 3" in texte for texte in faux.textes("info"))
+    assert any("Plafond de 9" in texte for texte in faux.textes("info"))
+
+
+def test_injection_suspendue_pendant_enquete(zones, monkeypatch):
+    from rappel import pipeline_demo
+
+    faux = FauxSt(clics=["rappel_injecter"])
+    faux.session_state["rappel_courant"] = "en-attente"
+    faux.session_state["rappel_selection"] = "ancien-termine"
+    module = zones(faux)
+    client = Mock()
+    client.sante.return_value = {"llm": "fake"}
+    client.lire_incident.return_value = {"statut": "en_cours"}
+    injecter = Mock()
+    monkeypatch.setattr(pipeline_demo, "injecter", injecter)
+    module.zone_pipeline(client)
+    injecter.assert_not_called()
+    client.creer_depuis_demo.assert_not_called()
+    client.lire_incident.assert_called_once_with("en-attente")
+    assert faux.session_state["rappel_rejeux"] == 0
+
+
+def test_budget_reel_neuf_enquetes_exige_accord(zones):
+    faux = FauxSt()
+    module = zones(faux)
+    client = Mock()
+    client.sante.return_value = {"llm": "meterless"}
+    assert module.budget_enquetes(client) == 3
+    faux.checkbox = Mock(return_value=True)
+    assert module.budget_enquetes(client) == 9
+    client.sante.side_effect = module.ErreurApi("API coupée")
+    assert module.budget_enquetes(client) is None
+
+
+def test_creation_incertitude_bloque_nouvelle_injection(zones, monkeypatch):
+    from rappel import pipeline_demo
+
+    faux = FauxSt(clics=["rappel_injecter"] * 2)
+    module = zones(faux)
+    client = Mock()
+    client.sante.return_value = {"llm": "fake"}
+    client.creer_depuis_demo.side_effect = module.ErreurApi("API coupée")
+    client.lire_incident.side_effect = module.ErreurApi("Incident inconnu", 404)
+    injecter = Mock()
+    monkeypatch.setattr(pipeline_demo, "injecter", injecter)
+    module.zone_pipeline(client)
+    module.zone_pipeline(client)
+    injecter.assert_called_once()
+    client.creer_depuis_demo.assert_called_once()
+    assert faux.session_state["rappel_rejeux"] == 1
 
 
 def test_enquete_sans_evenement_en_cours(zones, tmp_path):
@@ -173,3 +229,125 @@ def test_incident_deja_fini_et_api_coupee(zones, application):
     module.zone_relations(coupe)
     assert faux.textes("warning") == [logique.MESSAGE_API_COUPEE]
     assert logique.MESSAGE_API_COUPEE in faux.textes("caption")
+
+
+def incident_avec_correctif(**modifications):
+    return {
+        "statut": "termine", "decision_humaine": None,
+        "correctif": {
+            "description": "Renommer la colonne", "patch": "-amount\n+total",
+            "niveau_risque": "validation", "confiance": 0.85,
+            "reversible": True, "elements_touches": ["pipeline.py"],
+            "justification": "Preuve q1", **modifications,
+        },
+    }
+
+
+@pytest.mark.parametrize("decision", ["appliquer", "refuser"])
+def test_panneau_action_detail_et_envoi_unique(zones, decision):
+    faux = FauxSt(clics=[f"rappel_{decision}_p1"])
+    module = zones(faux)
+    client = Mock(url_base="http://testserver")
+    client.decision.return_value = {"id": "p1", "decision": decision, "execute": False}
+    incident = incident_avec_correctif()
+    module.afficher_action(client, "p1", incident)
+    faux.clics.append(f"rappel_{decision}_p1")
+    module.afficher_action(client, "p1", incident)
+    client.decision.assert_called_once_with("p1", decision)
+    assert "Renommer la colonne" in faux.textes("write")
+    assert "Preuve q1" in faux.textes("write")
+    assert "-amount\n+total" in faux.textes("code")
+    assert any(args == ("Confiance", "85%") for nom, args, _ in faux.appels if nom == "metric")
+    assert "Aucun patch exécuté." in faux.textes("info")
+    boutons = [options for nom, _, options in faux.appels if nom == "button"]
+    assert len(boutons) == 4
+    assert all(options["disabled"] for options in boutons[-2:])
+
+
+@pytest.mark.parametrize("modification", [{"niveau_risque": "refus"}, {"reversible": False}])
+def test_panneau_action_bloque_application(zones, modification):
+    faux = FauxSt(clics=["rappel_appliquer_p1"])
+    module = zones(faux)
+    client = Mock(url_base="http://testserver")
+    module.afficher_action(client, "p1", incident_avec_correctif(**modification))
+    client.decision.assert_not_called()
+    boutons = {options["key"]: options["disabled"] for nom, _, options in faux.appels if nom == "button"}
+    assert boutons == {"rappel_appliquer_p1": True, "rappel_refuser_p1": False}
+
+
+@pytest.mark.parametrize("resultat", [None, {}, {"id": "autre", "decision": "appliquer", "execute": False}])
+def test_panneau_action_reponse_invalide_non_rejouee(zones, resultat):
+    faux = FauxSt(clics=["rappel_appliquer_p1"])
+    module = zones(faux)
+    client = Mock(url_base="http://testserver")
+    client.decision.return_value = resultat
+    module.afficher_action(client, "p1", incident_avec_correctif())
+    faux.clics.append("rappel_appliquer_p1")
+    module.afficher_action(client, "p1", incident_avec_correctif())
+    client.decision.assert_called_once()
+    assert any("non confirmée" in texte for texte in faux.textes("warning"))
+
+
+def test_panneau_action_timeout_et_decision_deja_enregistree(zones):
+    faux = FauxSt(clics=["rappel_appliquer_p1"])
+    module = zones(faux)
+    client = Mock(url_base="http://testserver")
+    client.decision.side_effect = module.ErreurApi("API coupée")
+    module.afficher_action(client, "p1", incident_avec_correctif())
+    faux.clics.append("rappel_appliquer_p1")
+    module.afficher_action(client, "p1", incident_avec_correctif())
+    client.decision.assert_called_once()
+    assert any("non confirmée" in texte for texte in faux.textes("warning"))
+    faux.session_state.clear()
+    incident = {**incident_avec_correctif(), "decision_humaine": "appliquer", "resultat_action": "echoue"}
+    module.afficher_action(client, "p1", incident)
+    client.decision.assert_called_once()
+    assert "Résultat de l'action confirmé : échoué." in faux.textes("error")
+
+
+def test_panneau_action_abstention_sans_boutons(zones):
+    faux = FauxSt()
+    module = zones(faux)
+    incident = {**incident_avec_correctif(), "decision_abstention": {"abstient": True}}
+    module.afficher_action(Mock(url_base="http://testserver"), "p1", incident)
+    assert not faux.appels
+
+
+def test_panneau_memoire_consultation_et_souvenirs(zones):
+    faux = FauxSt()
+    module = zones(faux)
+    faux.session_state.update(rappel_courant="p2", rappel_evenements={"p2": [
+        {"acteur": "historien", "type": "preuve", "etape": 2, "texte": "incident similaire, résultat non confirmé"},
+    ]})
+    client = Mock()
+    client.fil.return_value = []
+    client.graphe.return_value = {
+        "noeuds": [{"id": "signature:panne", "type": "signature"}],
+        "aretes": [{"source": "incident:p2", "cible": "signature:panne", "type": "a_pour_signature"}],
+    }
+    client.memoire.return_value = {
+        "souvenirs": [{"signature": "panne", "cause_confirmee": "colonne", "resultat": "reussi"}],
+        "statuts_resultat": ["non_confirme"], "refutations_par_signature": {"panne": ["disque"]},
+    }
+    module.zone_memoire(client)
+    client.memoire.assert_called_once_with("panne")
+    assert "incident similaire, résultat non confirmé" in faux.textes("write")
+    assert "disque" in faux.textes("write")
+    tableaux = [args[0] for nom, args, _ in faux.appels if nom == "table"]
+    assert tableaux[0][0]["résultat"] == "non confirmé"
+
+
+def test_panneau_memoire_absent_ou_indisponible(zones):
+    faux = FauxSt()
+    module = zones(faux)
+    client = Mock()
+    client.fil.return_value = []
+    module.zone_memoire(client)
+    client.graphe.assert_not_called()
+    faux.session_state["rappel_courant"] = "p1"
+    client.graphe.return_value = {"noeuds": [], "aretes": []}
+    module.zone_memoire(client)
+    client.memoire.assert_not_called()
+    client.graphe.side_effect = module.ErreurApi("API coupée")
+    module.zone_memoire(client)
+    assert any("Mémoire indisponible" in texte for texte in faux.textes("warning"))
