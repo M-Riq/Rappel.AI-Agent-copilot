@@ -8,9 +8,10 @@ DELAI_S = 5
 class ErreurApi(Exception):
     """Erreur assainie : statut HTTP éventuel et message sans détail technique."""
 
-    def __init__(self, message: str, statut: int | None = None):
+    def __init__(self, message: str, statut: int | None = None, detail: str | None = None):
         super().__init__(message)
         self.statut = statut
+        self.detail = detail
 
 
 class ClientApi:
@@ -32,8 +33,9 @@ class ClientApi:
                 detail = corps.get("detail") if isinstance(corps, dict) else None
             except ValueError:
                 pass
-            message = detail if isinstance(detail, str) and len(detail) <= 200 else "requête refusée"
-            raise ErreurApi(f"Erreur API {statut} : {message}", statut)
+            detail = detail if isinstance(detail, str) and len(detail) <= 200 else None
+            message = detail if detail is not None else "requête refusée"
+            raise ErreurApi(f"Erreur API {statut} : {message}", statut, detail)
         try:
             return reponse.json()
         except ValueError:
