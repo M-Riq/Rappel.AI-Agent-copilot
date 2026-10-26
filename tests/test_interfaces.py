@@ -87,7 +87,10 @@ def test_meterless_entetes_lanes(monkeypatch, role, modele):
     }
     assert params["json"]["model"] == modele
     assert params["json"]["tools"] == [RUN_SQL_TOOL]
-    assert params["timeout"] == 60
+    # Délais séparés connexion / lecture (180 s configurable, METERLESS_DELAI_S) ;
+    # la valeur se compare aussi au délai de lecture seul (180 s, attente de main).
+    assert params["timeout"] == (10.0, 180.0)
+    assert params["timeout"] == 180
     assert resultat == {
         "texte": "", "tool_calls": [{"id": "outil-1"}],
         "modele": "nemotron-effectif", "usage": {"total_tokens": 12},
@@ -143,7 +146,8 @@ def test_zetaris_rest(monkeypatch):
         assert params["headers"]["X-Org-ID"] == "1"
         UUID(params["headers"]["X-Request-ID"])
         assert params["json"] == {"sql": "SELECT 1 AS one"}
-        assert params["timeout"] == 30
+        # Délais séparés connexion / lecture (ZETARIS_DELAI_S).
+        assert params["timeout"] == (10.0, 60.0)
     assert appels[0][1]["headers"]["X-Request-ID"] != appels[1][1]["headers"]["X-Request-ID"]
     assert RUN_SQL_TOOL["function"]["name"] == "run_sql"
 
