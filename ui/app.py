@@ -1,4 +1,4 @@
-"""Lecture des événements P1, avec repli local si l'API est indisponible."""
+"""Navigation de l'espace de travail Rappel et exemple P1 en lecture seule."""
 
 import json
 from pathlib import Path
@@ -84,9 +84,11 @@ def afficher_evenement(evenement):
         st.code(str(evenement["requete_sql"]), language="sql")
 
 
-def main():
-    st.set_page_config(page_title="Rappel — incident P1")
-    st.title("Rappel — incident P1")
+def afficher_exemple():
+    import zones
+
+    st.title("Exemple P1")
+    st.caption("Exemple en lecture seule, indépendant des incidents de la session.")
     try:
         configuration = charger()
     except (ValueError, TypeError):
@@ -115,14 +117,39 @@ def main():
         return
     if hors_ligne:
         st.warning("API coupée ou indisponible : affichage des événements de la fixture locale.")
-    for evenement in trier_evenements(evenements):
+    evenements = zones.filtres_affichage(trier_evenements(evenements), "rappel_exemple", (("type", "Types d'événement"),))
+    for evenement in zones.pagination_affichage(evenements, "rappel_exemple"):
         afficher_evenement(evenement)
-    # Désactivé par défaut : la vue P1 ci-dessus reste celle du squelette.
-    if st.toggle("Enquête en direct (trois zones)", value=False):
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import zones
 
-        zones.afficher(configuration.api_url)
+
+def main():
+    import zones
+
+    st.set_page_config(page_title="Rappel", layout="wide", initial_sidebar_state="auto")
+    st.html(
+        "<script>document.documentElement.lang = 'fr'; document.body.lang = 'fr';</script>",
+        unsafe_allow_javascript=True,
+    )
+    vues = [
+        ("pages/0_Incidents.py", "Incidents", "format_list_bulleted", "incidents"),
+        ("pages/1_Enquete_en_direct.py", "Enquête", "manage_search", "enquete"),
+        ("pages/2_Actions.py", "Actions", "task_alt", "actions"),
+        ("pages/3_Memoire.py", "Mémoire", "history", "memoire"),
+        ("pages/4_Compteurs.py", "Compteurs", "bar_chart", "compteurs"),
+        ("pages/5_Relations.py", "Relations", "account_tree", "relations"),
+        ("pages/6_Exemple_P1.py", "Exemple P1", "science", "exemple"),
+    ]
+    pages = [st.Page(chemin, title=titre, icon=f":material/{icone}:", url_path=url, default=index == 0)
+             for index, (chemin, titre, icone, url) in enumerate(vues)]
+    navigation = st.navigation({"Rappel": pages[:3], "Analyse": pages[3:6], "Exemple": pages[6:]},
+                               position="sidebar", expanded=True)
+    try:
+        configuration = charger()
+    except (ValueError, TypeError):
+        st.error("Configuration invalide. Vérifiez les paramètres de l'application.")
+        return
+    zones.barre_laterale(zones.ClientApi(configuration.api_url))
+    navigation.run()
 
 
 if __name__ == "__main__":
