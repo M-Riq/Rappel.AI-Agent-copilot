@@ -246,6 +246,8 @@ def faux_complets(local, monkeypatch):
         pilote = FauxPsycopg()
         environnement_faux_services(monkeypatch, faux_nightshift, faux_zetaris, pilote)
         from rappel.enquete import boucle_sql
+        from rappel.ingestion import contexte_demo
+        from rappel.pipeline_demo.pipeline import SCENARIOS
 
         original = boucle_sql.creer_run_sql
 
@@ -254,7 +256,13 @@ def faux_complets(local, monkeypatch):
             faux_zetaris.contexte = contexte.model_dump() if hasattr(contexte, "model_dump") else contexte
             return original(contexte, configuration)
 
+        def contrat_du_faux_zetaris(configuration=None, ordre=()):
+            # Le faux Zetaris n'expose pas rappel.schema_contract : on sert le contrat de référence
+            # (identique à la configuration du pipeline). La lecture réelle est testée dans test_contrat_zetaris.py.
+            return [f"{nom}:{type_colonne}" for nom, type_colonne in SCENARIOS["schema_attendu"].items()]
+
         monkeypatch.setattr(boucle_sql, "creer_run_sql", servir_le_contexte)
+        monkeypatch.setattr(contexte_demo, "schema_attendu_zetaris", contrat_du_faux_zetaris)
         yield faux_nightshift, faux_zetaris, pilote
 
 

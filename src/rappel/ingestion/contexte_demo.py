@@ -3,11 +3,14 @@
 Le contexte est assemblé à partir des fichiers du pipeline : logs réduits en modèles, commits
 récents, schémas attendu/observé et métriques. Il est validé par le JSON Schema de l'équipe.
 Les données viennent d'un pipeline simulé : `infos["simulation"]` le dit toujours.
+En mode SOURCE_PROVIDER=zetaris, le schéma attendu vient de rappel.schema_contract.
 """
 
 from datetime import datetime, timezone
 
+from rappel.config import charger
 from rappel.contrats import valider
+from rappel.ingestion.contrat_zetaris import SOURCE_LOCALE, SOURCE_ZETARIS, schema_attendu_zetaris
 from rappel.ingestion.ecarts_schema import detecter_ecarts, moteur_detection
 from rappel.ingestion.reducteur_logs import reduire_logs
 from rappel.pipeline_demo.pipeline import chemins, lire_etat, lire_json, schema_attendu, schema_observe
@@ -31,14 +34,26 @@ def signature_incident(composant: str, ecarts: list[dict], modeles: list[dict], 
     return f"anomalie:{composant}"
 
 
-def construire_contexte(dossier=None, incident_id: str | None = None) -> tuple[dict, dict]:
+def _schema_attendu(dossier, configuration) -> tuple[list[str], str]:
+    """(schéma attendu, source) : contrat Zetaris en mode zetaris, configuration locale sinon."""
+    local = schema_attendu(dossier)
+    if configuration.source_provider != "zetaris":
+        return local, SOURCE_LOCALE
+    ordre = [colonne.split(":", 1)[0] for colonne in local]
+    # Pas de repli silencieux sur le local : une erreur Zetaris remonte telle quelle.
+    return schema_attendu_zetaris(configuration, ordre=ordre), SOURCE_ZETARIS
+
+
+def construire_contexte(dossier=None, incident_id: str | None = None, configuration=None) -> tuple[dict, dict]:
     """Retourne (contexte conforme au contrat, informations de construction)."""
+    configuration = configuration or charger()
     fichiers = chemins(dossier)
     etat = lire_etat(dossier)
     lignes = fichiers["logs"].read_text(encoding="utf-8").splitlines()
     modeles, reducteur = reduire_logs(lignes)
     commits = lire_json(fichiers["commits"])[-NB_COMMITS_RECENTS:]
-    attendu, observe = schema_attendu(dossier), schema_observe(dossier)
+    attendu, source_attendu = _schema_attendu(dossier, configuration)
+    observe = schema_observe(dossier)
     ecarts = detecter_ecarts(attendu, observe)
     horodatage = _horodatage()
     scenario = etat.get("scenario") or "demo"
@@ -58,5 +73,6 @@ def construire_contexte(dossier=None, incident_id: str | None = None) -> tuple[d
         "reducteur_logs": reducteur, "nb_lignes_logs": len(lignes), "nb_modeles": len(modeles),
         "detecteur_schema": detecteur, "message_detecteur": message_detecteur, "ecarts_schema": ecarts,
         "statut_pipeline": etat["statut"], "scenario": scenario, "simulation": True,
+        "source_schema_attendu": source_attendu,
     }
     return contexte, infos
