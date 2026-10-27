@@ -178,6 +178,7 @@ def extraire_lignes(donnees):
             return lignes
     return None
 
+
 def run_sql(sql, *, configuration=None, scenario="p1"):
     from rappel.interfaces.client_http import ErreurService
 
