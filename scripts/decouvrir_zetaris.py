@@ -38,7 +38,6 @@ SONDES_DIALECTE = (
     ("<> (différent)", "SELECT 1 AS one WHERE 1 <> 2"),
     ("LOWER / LIKE", "SELECT 1 AS one WHERE LOWER('AbC') LIKE '%b%'"),
 )
-REQUETE_TABLES = "SELECT table_name FROM information_schema.tables"
 
 
 def lire_openapi(configuration) -> dict:
@@ -68,12 +67,17 @@ def lire_openapi(configuration) -> dict:
         if not post or "sql" not in chemin.lower():
             continue
         schema = (post.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {}))
-        proprietes = [nom for nom, definition in schema.get("properties", {}).items()
-                      if isinstance(definition, dict) and definition.get("type") == "string"]
+        proprietes = schema.get("properties", {})
+        proprietes_texte = [nom for nom, definition in proprietes.items()
+                            if isinstance(definition, dict) and definition.get("type") == "string"]
+        cles_sql = ("sql", "statement", "query", "querytext", "query_text")
+        cle_sql = next((nom for cle in cles_sql for nom in proprietes_texte if nom.lower() == cle), None)
+        if cle_sql is None:
+            cle_sql = next((nom for nom in proprietes_texte if nom.lower() not in ("queryid", "source")), None)
         en_tetes = [parametre.get("name") for parametre in post.get("parameters", []) if parametre.get("in") == "header"]
         prefixe = parties.path.rstrip("/")
         chemin_relatif = chemin[len(prefixe):] if prefixe and chemin.startswith(prefixe) else chemin
-        return {"publie": True, "chemin_sql": chemin_relatif, "cle_sql": proprietes[0] if proprietes else None,
+        return {"publie": True, "chemin_sql": chemin_relatif, "cle_sql": cle_sql,
                 "en_tetes": en_tetes}
     return {"publie": True, "chemin_sql": None, "cle_sql": None, "en_tetes": []}
 
@@ -105,14 +109,20 @@ def decouvrir(configuration) -> dict:
     rapport["select_1"] = {"statut": REUSSI if ok else ECHOUE, "detail": erreur or ("one = 1" if ok else "réponse inattendue")}
     if not ok:
         return rapport
-    lignes, erreur = executer(REQUETE_TABLES, configuration)
-    if lignes is None:
-        rapport["tables"] = {"statut": NON_MESURE, "detail": erreur}
-    else:
-        visibles = {str(next(iter(ligne.values()))).lower() for ligne in lignes if isinstance(ligne, dict) and ligne}
-        manquantes = [table for table in TABLES if table not in visibles]
-        rapport["tables"] = {"statut": REUSSI if not manquantes else ECHOUE, "visibles": sorted(visibles),
-                             "manquantes": manquantes}
+    accessibles, erreurs_tables = [], {}
+    for table in TABLES:
+        lignes, erreur = executer(f"SELECT 1 AS reachable FROM {table} LIMIT 1", configuration)
+        if lignes is None:
+            erreurs_tables[table] = erreur
+        else:
+            accessibles.append(table)
+    manquantes = [table for table in TABLES if table not in accessibles]
+    rapport["tables"] = {
+        "statut": REUSSI if not manquantes else ECHOUE,
+        "visibles": accessibles,
+        "manquantes": manquantes,
+        "erreurs": erreurs_tables,
+    }
     for nom, sql in SONDES_DIALECTE:
         lignes, erreur = executer(sql, configuration)
         rapport["dialecte"].append({"construction": nom, "statut": REUSSI if lignes is not None else ECHOUE,
@@ -145,7 +155,8 @@ def main(argv=None) -> int:
     if rapport["tables"]:
         tables = rapport["tables"]
         afficher(f"Tables de docs/run_sql.md : {tables['statut']}"
-                 + (f" ; manquantes : {', '.join(tables['manquantes'])} (à exposer par Juan)" if tables.get("manquantes") else "")
+                 + (f" ; SELECT impossible : {', '.join(tables['manquantes'])} "
+                    "(vérifier le mapping JDBC et les vues Rappel)" if tables.get("manquantes") else "")
                  + (f" ; {tables['detail']}" if tables.get("detail") else ""))
     for sonde in rapport["dialecte"]:
         afficher(f"Dialecte {sonde['construction']} : {sonde['statut']} ({sonde['detail']})")

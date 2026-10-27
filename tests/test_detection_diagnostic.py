@@ -67,6 +67,8 @@ def test_decouverte_zetaris(local, monkeypatch, tmp_path, capsys, publier):
         rapport = json.loads(destination.read_text(encoding="utf-8"))
         sortie = capsys.readouterr().out
         assert rapport["select_1"]["statut"] == "REUSSI" and rapport["tables"]["manquantes"] == []
+        assert set(rapport["tables"]["visibles"]) == {"logs", "commits", "colonnes_attendues",
+                                                       "colonnes_observees", "metriques"}
         dialecte = {sonde["construction"]: sonde["statut"] for sonde in rapport["dialecte"]}
         assert dialecte["LIMIT"] == "REUSSI" and dialecte["FETCH FIRST"] == "ECHOUE"  # SQLite du faux service
         if publier:
@@ -76,6 +78,11 @@ def test_decouverte_zetaris(local, monkeypatch, tmp_path, capsys, publier):
         assert serveur.cle not in sortie and serveur.cle not in destination.read_text(encoding="utf-8")
         assert all(requete["methode"] == "GET" or requete["corps"].get("statement", "").upper().startswith("SELECT")
                    for requete in serveur.requetes)
+        assert any(
+            requete["methode"] == "POST"
+            and requete["corps"].get("statement") == "SELECT 1 AS reachable FROM logs LIMIT 1"
+            for requete in serveur.requetes
+        )
 
 
 def test_decouverte_sans_cle(monkeypatch, capsys):

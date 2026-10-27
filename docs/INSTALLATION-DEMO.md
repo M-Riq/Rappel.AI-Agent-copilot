@@ -53,11 +53,12 @@ python scripts\verifier_machine_demo.py              # local : services NON_MESU
 python scripts\verifier_machine_demo.py --confirmer  # appels réels
 ```
 
-Avec `--confirmer` : Zetaris `SELECT 1 AS one`, requête sur deux sources
-(`pipeline.commits` et `pipeline.logs` : commit `a1b2c3` et 214 `KeyError`), Meterless
-(`check_meterless.py` : modèles et modèle effectif) et Postgres (`check_postgres.py` : SELECT 1,
-tables, aller-retour annulé). Résultat dans `data/verification_machine.json`. Aucune clé ni mot
-de passe n'est affiché (valeurs masquées).
+Avec `--confirmer` : Zetaris `SELECT 1 AS one` et sondes `SELECT 1 ... LIMIT 1`
+sur les cinq tables Rappel, Meterless (`check_meterless.py` : modèles et modèle effectif)
+et Postgres (`check_postgres.py` : SELECT 1, tables, aller-retour annulé) sont appelés.
+Les sondes Zetaris sont en lecture seule et ne lisent ni n'inventent de données d'incident.
+Résultat dans `data/verification_machine.json`. Aucune clé ni mot de passe n'est affiché
+(valeurs masquées).
 
 ## 4 bis. Go / no-go
 

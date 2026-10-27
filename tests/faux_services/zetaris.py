@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+from uuid import UUID
 
 from tests.faux_services.serveur import ServeurLocal
 
@@ -39,8 +40,13 @@ class FauxZetaris(ServeurLocal):
                 "parameters": [{"name": "X-Org-ID", "in": "header", "required": True},
                                {"name": "X-Request-ID", "in": "header", "required": True}],
                 "requestBody": {"content": {"application/json": {"schema": {
-                    "type": "object", "required": [self.cle_sql],
-                    "properties": {self.cle_sql: {"type": "string"}}}}}},
+                    "type": "object", "required": ["queryId", self.cle_sql, "limit", "source"],
+                    "properties": {
+                        "queryId": {"type": "string"},
+                        self.cle_sql: {"type": "string"},
+                        "limit": {"type": "integer"},
+                        "source": {"type": "string"},
+                    }}}}},
             }},
             "/api/v1.0/health": {"get": {"summary": "Health"}},
         }}
@@ -67,8 +73,17 @@ class FauxZetaris(ServeurLocal):
             scenario = self.scenarios.pop(0) if self.scenarios else "ok"
         if not isinstance(corps, dict) or not isinstance(corps.get(self.cle_sql), str):
             return 400, {"message": f"champ {self.cle_sql} requis dans le corps"}, None
+        try:
+            if UUID(corps.get("queryId", "")).version != 4:
+                raise ValueError
+        except (AttributeError, TypeError, ValueError):
+            return 400, {"message": "queryId UUID v4 requis"}, None
+        if corps.get("source") != "SqlEditor" or not isinstance(corps.get("limit"), int):
+            return 400, {"message": "source ou limit invalide"}, None
         if scenario in ("401", "500", "429"):
             return int(scenario), {"message": f"erreur simulee {scenario}"}, None
+        if scenario == "table_not_found_real":
+            return 400, {"msg": "[TABLE_OR_VIEW_NOT_FOUND] The table or view `default`.`logs` cannot be found."}, None
         sql = corps[self.cle_sql]
         if scenario == "syntaxe_limit" or (self.refuser_limit and re.search(r"\blimit\b", sql, re.IGNORECASE)):
             return 400, {"message": "Syntax error: mismatched input 'LIMIT' expecting <EOF>"}, None

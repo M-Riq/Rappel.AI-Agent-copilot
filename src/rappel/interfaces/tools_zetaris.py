@@ -12,6 +12,8 @@ from rappel.config import RACINE, charger
 from rappel.securite import url_service
 
 # Clé du SQL dans le corps et endpoint : ZETARIS_CLE_SQL / ZETARIS_CHEMIN_SQL (scripts/decouvrir_zetaris.py).
+SOURCE_SQL_EDITOR = "SqlEditor"
+LIMITE_LIGNES_REQUETE = 20
 
 RUN_SQL_TOOL = {
     "type": "function",
@@ -141,8 +143,8 @@ CONSEILS_ZETARIS = {
     "coupe_circuit": "trop d'échecs consécutifs : attendre une minute puis lancer scripts/check_zetaris.py",
     "trop_volumineux": "résultat trop volumineux : restreindre la requête (LIMIT)",
 }
-MOTS_TABLE_INCONNUE = ("table or view not found", "table not found", "does not exist", "unknown table",
-                       "no such table", "not found")
+MOTS_TABLE_INCONNUE = ("table or view not found", "table_or_view_not_found", "table not found",
+                       "does not exist", "unknown table", "no such table", "not found")
 MOTS_SYNTAXE = ("syntax", "parse", "mismatched", "unexpected", "dialect", "not supported")
 _CLIENTS: dict = {}
 
@@ -199,7 +201,12 @@ def run_sql(sql, *, configuration=None, scenario="p1"):
                 "X-Org-ID": configuration.zetaris_org_id,
                 "X-Request-ID": str(uuid4()),
             },
-            json={configuration.zetaris_cle_sql: sql},
+            json={
+                "queryId": str(uuid4()),
+                configuration.zetaris_cle_sql: sql,
+                "limit": LIMITE_LIGNES_REQUETE,
+                "source": SOURCE_SQL_EDITOR,
+            },
         )
     except ErreurService as erreur:
         if erreur.categorie == "requete" and erreur.detail:

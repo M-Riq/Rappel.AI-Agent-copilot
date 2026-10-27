@@ -1,7 +1,7 @@
 """Vérification de la machine de démonstration : système, configuration et services réels.
 
 Sans --confirmer : contrôles locaux seulement (aucun appel réseau) ; les services réels sont
-NON_MESURE. Avec --confirmer : Zetaris (SELECT 1 AS one, requête sur deux sources), Meterless
+NON_MESURE. Avec --confirmer : Zetaris (SELECT 1 AS one et tables Rappel), Meterless
 et Postgres sont appelés. Aucune clé ni mot de passe n'est affiché.
 """
 
@@ -147,6 +147,7 @@ def _executer_script(main):
 
 def verifier_services(configuration):
     from rappel.interfaces.tools_zetaris import run_sql
+    from rappel.interfaces.run_sql import TABLES
     from scripts import check_meterless, check_postgres
 
     lignes = []
@@ -157,13 +158,18 @@ def verifier_services(configuration):
         lignes.append(ligne("Zetaris SELECT 1", REUSSI if ok else ECHOUE, "one = 1" if ok else "réponse inattendue"))
     except (ValueError, RuntimeError, KeyError, TypeError) as erreur:
         lignes.append(ligne("Zetaris SELECT 1", ECHOUE, erreur))
-    try:
-        resultat = run_sql(REQUETE_DEUX_SOURCES, configuration=zetaris)
-        ok = _verifier_deux_sources(resultat)
-        lignes.append(ligne("Zetaris 2 sources", REUSSI if ok else ECHOUE,
-                            "a1b2c3 et 214 KeyError trouvés" if ok else "tables pipeline.commits/logs à aligner (docs/run_sql.md)"))
-    except (ValueError, RuntimeError, KeyError, TypeError) as erreur:
-        lignes.append(ligne("Zetaris 2 sources", ECHOUE, erreur))
+    inaccessibles = []
+    for table in TABLES:
+        try:
+            run_sql(f"SELECT 1 AS reachable FROM {table} LIMIT 1", configuration=zetaris)
+        except (ValueError, RuntimeError, KeyError, TypeError):
+            inaccessibles.append(table)
+    if inaccessibles:
+        detail = "SELECT impossible sur : " + ", ".join(inaccessibles)
+        detail += " (vérifier le mapping JDBC et les vues Rappel)"
+        lignes.append(ligne("Zetaris tables Rappel", ECHOUE, detail))
+    else:
+        lignes.append(ligne("Zetaris tables Rappel", REUSSI, "SELECT en lecture seule accessible pour les cinq tables"))
     for nom, module in (("Meterless", check_meterless), ("Postgres", check_postgres)):
         code, detail = _executer_script(module.main)
         lignes.append(ligne(nom, REUSSI if code == 0 else ECHOUE, detail))
@@ -172,7 +178,8 @@ def verifier_services(configuration):
 
 def services_non_mesures():
     raison = "--confirmer requis (appel réel)"
-    return [ligne(nom, NON_MESURE, raison) for nom in ("Zetaris SELECT 1", "Zetaris 2 sources", "Meterless", "Postgres")]
+    return [ligne(nom, NON_MESURE, raison) for nom in
+            ("Zetaris SELECT 1", "Zetaris tables Rappel", "Meterless", "Postgres")]
 
 
 def main(argv=None):

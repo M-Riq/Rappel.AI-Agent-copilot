@@ -41,8 +41,19 @@ class RunSqlZetaris:                     # src/rappel/interfaces/run_sql.py
 ```
 
 `RunSqlZetaris` applique `valider_sql`, puis appelle `tools_zetaris.run_sql` du squelette
-(une instruction, `X-Request-ID` neuf, Authorization Bearer, `X-Org-ID`) et convertit
-les lignes (dictionnaires) en `colonnes` / `lignes`.
+(une instruction, UUID v4 neuf dans `queryId` et `X-Request-ID`, Authorization Bearer,
+`X-Org-ID`) et convertit les lignes (dictionnaires) en `colonnes` / `lignes`. Le corps
+REST comprend aussi la clé SQL configurée (`ZETARIS_CLE_SQL`), `limit: 20` et
+`source: "SqlEditor"` :
+
+```json
+{
+  "queryId": "<UUID v4 neuf>",
+  "sql": "SELECT 1",
+  "limit": 20,
+  "source": "SqlEditor"
+}
+```
 
 `ResultatSql` (Pydantic, `extra="forbid"`) :
 
@@ -60,6 +71,11 @@ Une requete refusee ou en erreur renvoie un `ResultatSql` avec `erreur`, jamais
 une exception. Prefixes utilises : `requete refusee : ...` (garde-fou, rien
 execute) et `erreur SQL : ...` (execute mais echoue ; message sans element
 d'authentification).
+
+Le diagnostic `scripts/decouvrir_zetaris.py` vérifie chaque nom de table attendu
+par une requête de lecture `SELECT 1 ... LIMIT 1`. Une table listée dans le catalogue
+de datasource n'est donc pas considérée accessible tant que cette requête ne réussit
+pas ; les vues non qualifiées restent nécessaires pour les requêtes de Rappel.
 
 ## 3. Garde-fous (`valider_sql(sql, tables_autorisees)`)
 

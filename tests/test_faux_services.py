@@ -7,6 +7,7 @@ des erreurs et absence de secret, pas l'usage réel des sponsors.
 
 from dataclasses import replace
 import json
+from uuid import UUID
 
 import pytest
 
@@ -173,8 +174,14 @@ def test_zetaris_entetes_identifiant_unique_et_cle_configurable(zetaris):
     identifiants = [requete["entetes"]["X-Request-ID"] for requete in zetaris.requetes]
     assert len(set(identifiants)) == 3
     for requete in zetaris.requetes:
-        assert requete["chemin"] == "/api/v1.0/requetes/sql" and set(requete["corps"]) == {"statement"}
+        assert requete["chemin"] == "/api/v1.0/requetes/sql"
+        assert set(requete["corps"]) == {"queryId", "statement", "limit", "source"}
+        assert UUID(requete["corps"]["queryId"]).version == 4
+        assert requete["corps"]["statement"] == "SELECT 1 AS one"
+        assert requete["corps"]["limit"] == 20
+        assert requete["corps"]["source"] == "SqlEditor"
         assert requete["entetes"]["X-Org-ID"] == "7"
+        assert UUID(requete["entetes"]["X-Request-ID"]).version == 4
 
 
 def test_zetaris_erreurs_classees_sans_secret(zetaris):
@@ -190,6 +197,14 @@ def test_zetaris_erreurs_classees_sans_secret(zetaris):
         tools_zetaris.run_sql("SELECT 1 AS one", configuration=configuration)
     assert erreur.value.categorie == "non_autorise" and "ZETARIS_API_KEY" in str(erreur.value)
     assert textes_sans_secret([*erreurs.values(), erreur.value], zetaris.cle)
+
+
+def test_zetaris_table_or_view_not_found_est_classe(zetaris):
+    zetaris.scenarios.append("table_not_found_real")
+    configuration = configuration_zetaris(zetaris)
+    with pytest.raises(ErreurService) as erreur:
+        tools_zetaris.run_sql("SELECT 1 AS reachable FROM logs LIMIT 1", configuration=configuration)
+    assert erreur.value.categorie == "table_inconnue"
 
 
 def test_run_sql_zetaris_resultat_volumineux_tronque(zetaris):

@@ -56,7 +56,7 @@ def test_sans_confirmer_aucun_appel_reel(sans_reseau, tmp_path, capsys):
     code = verif.main(["--json", str(tmp_path / "v.json")])
     sortie = capsys.readouterr().out
     assert code == 0
-    for nom in ("Zetaris SELECT 1", "Zetaris 2 sources", "Meterless", "Postgres"):
+    for nom in ("Zetaris SELECT 1", "Zetaris tables Rappel", "Meterless", "Postgres"):
         assert f"{nom} | NON_MESURE | --confirmer requis" in sortie
     assert (tmp_path / "v.json").exists()
 
@@ -73,6 +73,8 @@ def test_avec_confirmer_services_simules(monkeypatch, tmp_path, capsys):
             return vrai_run_sql(sql, configuration=configuration, scenario=scenario)
         if sql == "SELECT 1 AS one":
             return {"requete": sql, "lignes": [{"one": 1}]}
+        if sql.startswith("SELECT 1 AS reachable FROM "):
+            return {"requete": sql, "lignes": []}
         raise RuntimeError(f"Zetaris a refusé la requête pour {JETON}")
 
     monkeypatch.setattr("rappel.interfaces.tools_zetaris.run_sql", faux_run_sql)
@@ -82,6 +84,6 @@ def test_avec_confirmer_services_simules(monkeypatch, tmp_path, capsys):
     sortie = capsys.readouterr().out
     assert code == 1
     assert "2 sources (simulé) | REUSSI" in sortie and "Zetaris SELECT 1 | REUSSI" in sortie
-    assert "Zetaris 2 sources | ECHOUE" in sortie
+    assert "Zetaris tables Rappel | REUSSI" in sortie
     assert "Meterless | ECHOUE" in sortie and "Postgres | REUSSI" in sortie
     assert JETON not in sortie and JETON not in (tmp_path / "v.json").read_text(encoding="utf-8")
