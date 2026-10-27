@@ -160,12 +160,15 @@ def client_zetaris(configuration):
 
 
 def extraire_lignes(donnees):
-    """Lignes Zetaris : liste, {lignes|rows|data|results: [...]}, ou {columns: [...], rows: [[...]]}."""
+    """Lignes Zetaris : liste, {lignes|rows|data|results: [...]}, ou {columns|headers: [...], rows|data: [[...]]}.
+
+    La passerelle UI du Gateway (/api/proxy/sql-editor/sqls/run-query) renvoie {"headers": [...], "data": [[...]]}.
+    """
     if isinstance(donnees, list):
         return donnees
     if not isinstance(donnees, dict):
         return None
-    colonnes = donnees.get("columns") or donnees.get("colonnes")
+    colonnes = donnees.get("columns") or donnees.get("colonnes") or donnees.get("headers")
     for cle in ("lignes", "rows", "data", "results"):
         lignes = donnees.get(cle)
         if isinstance(lignes, list):
@@ -174,7 +177,6 @@ def extraire_lignes(donnees):
                 return [dict(zip(noms, ligne)) for ligne in lignes]
             return lignes
     return None
-
 
 def run_sql(sql, *, configuration=None, scenario="p1"):
     from rappel.interfaces.client_http import ErreurService
