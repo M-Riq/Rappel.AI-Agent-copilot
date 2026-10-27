@@ -1,0 +1,7 @@
+dataset_name,column_name,expected_type,required
+transactions,transaction_id,string,true
+transactions,buyer_id,string,true
+transactions,amount,"decimal(12,2)",true
+transactions,recipient_id,string,true
+transactions,transaction_date,timestamp,true
+transactions,status,string,true
