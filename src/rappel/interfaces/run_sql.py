@@ -415,6 +415,12 @@ class RunSqlZetaris:
     def __init__(self, contexte: ContexteIncident | dict, configuration: Configuration | None = None) -> None:
         self.contexte = contexte
         self.configuration = configuration or charger()
+        if self.configuration.source_provider != "zetaris":
+            # Sans ce refus, tools_zetaris.run_sql interrogerait les fixtures locales sans le signaler (issue #15).
+            raise ValueError(
+                "RunSqlZetaris exige SOURCE_PROVIDER=zetaris "
+                f"(valeur actuelle : {self.configuration.source_provider!r})."
+            )
         self.tables_autorisees = tuple(TABLES) + TABLES_DONNEES_ZETARIS
 
     def __repr__(self) -> str:
