@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -12,6 +13,7 @@ import streamlit as st
 
 from rappel.config import RACINE, charger
 import logique
+from ui.traductions import LANGUES, traduire
 
 
 def _evenements(donnees):
@@ -52,12 +54,13 @@ def trier_evenements(evenements):
 
 
 def afficher_evenement(evenement):
+    import zones
+
     type_evenement = str(evenement.get("type", "information"))
-    st.caption(
-        f"Étape {evenement.get('etape', '?')} · "
-        f"{evenement.get('horodatage', '')} · {type_evenement}"
-    )
-    etiquette = logique.etiquette_debat(evenement)
+    st.caption(zones.texte("Étape {etape} · {horodatage} · {type_evenement}",
+                            etape=evenement.get("etape", "?"), horodatage=evenement.get("horodatage", ""),
+                            type_evenement=zones.texte(type_evenement)))
+    etiquette = logique.etiquette_debat(evenement, zones.langue_interface())
     if etiquette:
         st.caption(etiquette)
     texte = str(
@@ -79,7 +82,7 @@ def afficher_evenement(evenement):
     }.get(type_evenement.lower(), st.info)
     afficher(texte)
     if evenement.get("modele"):
-        st.text(f"Modèle : {evenement['modele']}")
+        st.text(zones.texte("Modèle : {modele}", modele=evenement["modele"]))
     if evenement.get("requete_sql"):
         st.code(str(evenement["requete_sql"]), language="sql")
 
@@ -87,12 +90,12 @@ def afficher_evenement(evenement):
 def afficher_exemple():
     import zones
 
-    st.title("Exemple P1")
-    st.caption("Exemple en lecture seule, indépendant des incidents de la session.")
+    st.title(zones.texte("Exemple P1"))
+    st.caption(zones.texte("Exemple en lecture seule, indépendant des incidents de la session."))
     try:
         configuration = charger()
     except (ValueError, TypeError):
-        st.error("Configuration invalide. Vérifiez les paramètres de l'application.")
+        st.error(zones.texte("Configuration invalide. Vérifiez les paramètres de l'application."))
         return
     try:
         reponse = requests.get(
@@ -107,16 +110,16 @@ def afficher_exemple():
                 if sante.get(nom)
             ]
             if modes:
-                st.text(f"Mode API — {' · '.join(modes)}")
+                st.text(zones.texte("Mode API — {modes}", modes=" · ".join(modes)))
     except (requests.RequestException, ValueError, TypeError):
         pass
     try:
         evenements, hors_ligne = charger_evenements(configuration)
     except (OSError, ValueError, TypeError):
-        st.error("Événements indisponibles : la fixture locale est absente ou invalide.")
+        st.error(zones.texte("Événements indisponibles : la fixture locale est absente ou invalide."))
         return
     if hors_ligne:
-        st.warning("API coupée ou indisponible : affichage des événements de la fixture locale.")
+        st.warning(zones.texte("API coupée ou indisponible : affichage des événements de la fixture locale."))
     evenements = zones.filtres_affichage(trier_evenements(evenements), "rappel_exemple", (("type", "Types d'événement"),))
     for evenement in zones.pagination_affichage(evenements, "rappel_exemple"):
         afficher_evenement(evenement)
@@ -126,8 +129,9 @@ def main():
     import zones
 
     st.set_page_config(page_title="Rappel", layout="wide", initial_sidebar_state="auto")
+    langue = zones.langue_interface()
     st.html(
-        "<script>document.documentElement.lang = 'fr'; document.body.lang = 'fr';</script>",
+        f"<script>document.documentElement.lang = '{langue}'; document.body.lang = '{langue}';</script>",
         unsafe_allow_javascript=True,
     )
     vues = [
@@ -139,14 +143,17 @@ def main():
         ("pages/5_Relations.py", "Relations", "account_tree", "relations"),
         ("pages/6_Exemple_P1.py", "Exemple P1", "science", "exemple"),
     ]
-    pages = [st.Page(chemin, title=titre, icon=f":material/{icone}:", url_path=url, default=index == 0)
+    pages = [st.Page(chemin, title=traduire(titre, langue), icon=f":material/{icone}:", url_path=url, default=index == 0)
              for index, (chemin, titre, icone, url) in enumerate(vues)]
-    navigation = st.navigation({"Rappel": pages[:3], "Analyse": pages[3:6], "Exemple": pages[6:]},
+    navigation = st.navigation({"Rappel": pages[:3], traduire("Analyse", langue): pages[3:6],
+                                traduire("Exemple", langue): pages[6:]},
                                position="sidebar", expanded=True)
+    st.sidebar.selectbox("Langue / Language", tuple(LANGUES), format_func=LANGUES.__getitem__,
+                          key="rappel_langue")
     try:
         configuration = charger()
     except (ValueError, TypeError):
-        st.error("Configuration invalide. Vérifiez les paramètres de l'application.")
+        st.error(zones.texte("Configuration invalide. Vérifiez les paramètres de l'application."))
         return
     zones.barre_laterale(zones.ClientApi(configuration.api_url))
     navigation.run()

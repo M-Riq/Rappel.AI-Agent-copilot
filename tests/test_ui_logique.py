@@ -28,6 +28,23 @@ logique = _charger("logique")
 client_api = _charger("client_api")
 
 
+def test_catalogue_bilingue_et_parametres_preserves():
+    from string import Formatter
+    from ui.traductions import ANGLAIS, traduire
+
+    def champs(texte):
+        return {champ for _, champ, _, _ in Formatter().parse(texte) if champ is not None}
+
+    for francais, anglais in ANGLAIS.items():
+        assert champs(francais) == champs(anglais), francais
+        assert traduire(francais, "fr") == francais
+        assert traduire(francais, "en") == anglais
+    assert traduire("Texte API inconnu {brut}", "en") == "Texte API inconnu {brut}"
+    assert logique.resume_incident({"statut": "en_cours"}, "en") == "Investigation in progress."
+    assert logique.libelle_incident("id", ["id"], {"id": "p1"}, "en") == "P1 · Investigation 1"
+    assert logique.texte_evenement({"texte": "Preuve originale {brute}"}, "en") == "Preuve originale {brute}"
+
+
 def test_aucun_import_streamlit_dans_la_logique():
     source = (UI / "logique.py").read_text(encoding="utf-8") + (UI / "client_api.py").read_text(encoding="utf-8")
     assert "streamlit" not in source

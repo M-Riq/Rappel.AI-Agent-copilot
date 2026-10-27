@@ -1,5 +1,7 @@
 """Logique pure de l'interface (aucun import de Streamlit ni de réseau) : testable hors interface."""
 
+from ui.traductions import traduire
+
 
 def filtrer_lignes(lignes: list[dict], recherche: str = "", selections: dict | None = None) -> list[dict]:
     termes = recherche.casefold().split()
@@ -32,12 +34,13 @@ def trier_lignes(lignes: list[dict], champ: str | None, decroissant: bool = Fals
     return sorted(lignes, key=cle_tri, reverse=decroissant)
 
 
-def libelle_incident(identifiant: str, incidents: list[str], scenarios: dict[str, str]) -> str:
+def libelle_incident(identifiant: str, incidents: list[str], scenarios: dict[str, str], langue: str = "fr") -> str:
     if identifiant not in incidents:
         return identifiant
     numero = incidents.index(identifiant) + 1
     scenario = scenarios.get(identifiant)
-    return f"{scenario.upper()} · Enquête {numero}" if scenario else f"Incident {numero}"
+    return (traduire("{scenario} · Enquête {numero}", langue, scenario=scenario.upper(), numero=numero)
+            if scenario else traduire("Incident {numero}", langue, numero=numero))
 
 
 REJEUX_MAX = 3
@@ -85,21 +88,21 @@ def role_debat(evenement: dict) -> str | None:
     return None
 
 
-def etiquette_debat(evenement: dict) -> str | None:
+def etiquette_debat(evenement: dict, langue: str = "fr") -> str | None:
     role = role_debat(evenement)
-    return None if role is None else f"Débat · {role}"
+    return None if role is None else traduire("Débat · {role}", langue, role=traduire(role, langue))
 
 
-def badge_modele(evenement: dict, simulation: bool) -> str | None:
+def badge_modele(evenement: dict, simulation: bool, langue: str = "fr") -> str | None:
     """Badge honnête : jamais « Nemotron » pour un modèle simulé ou un autre modèle."""
     modele = str(evenement.get("modele") or "").strip()
     if not modele:
-        return "simulé" if simulation and evenement.get("acteur") not in (None, "systeme") else None
+        return traduire("simulé", langue) if simulation and evenement.get("acteur") not in (None, "systeme") else None
     if simulation:
-        return f"simulé · {modele}"
+        return traduire("simulé · {modele}", langue, modele=modele)
     if "nemotron" in modele.lower():
-        return f"Nemotron via Meterless · {modele}"
-    return f"Modèle hors Nemotron : {modele} (fixer la voie)"
+        return traduire("Nemotron via Meterless · {modele}", langue, modele=modele)
+    return traduire("Modèle hors Nemotron : {modele} (fixer la voie)", langue, modele=modele)
 
 
 def sql_a_afficher(evenement: dict) -> str | None:
@@ -113,11 +116,13 @@ def sql_a_afficher(evenement: dict) -> str | None:
 LONGUEUR_MAX_TEXTE = 5000
 
 
-def texte_evenement(evenement: dict) -> str:
+def texte_evenement(evenement: dict, langue: str = "fr") -> str:
     """Texte affiché d'un événement, borné pour qu'un texte géant ne fige pas l'interface."""
     texte = str(evenement.get("texte", evenement.get("message", evenement.get("contenu", ""))))
     if len(texte) > LONGUEUR_MAX_TEXTE:
-        return texte[:LONGUEUR_MAX_TEXTE] + f"… [{len(texte) - LONGUEUR_MAX_TEXTE} caractères masqués]"
+        return texte[:LONGUEUR_MAX_TEXTE] + traduire(
+            "… [{nombre} caractères masqués]", langue, nombre=len(texte) - LONGUEUR_MAX_TEXTE,
+        )
     return texte
 
 
@@ -159,15 +164,16 @@ def enquete_terminee(incident: dict | None) -> bool:
     return isinstance(incident, dict) and incident.get("statut") in ("termine", "erreur")
 
 
-def mention_simulation(incident: dict | None) -> str | None:
+def mention_simulation(incident: dict | None, langue: str = "fr") -> str | None:
     if not isinstance(incident, dict):
         return None
     parties = []
     if incident.get("enquete_simulee"):
-        parties.append("raisonnement simulé (LLM fake)")
+        parties.append(traduire("raisonnement simulé (LLM fake)", langue))
     if incident.get("preuves_simulees"):
-        parties.append(f"preuves simulées ({incident.get('source_preuves') or 'simule'})")
-    return "Mode simulé : " + " ; ".join(parties) if parties else None
+        parties.append(traduire("preuves simulées ({source})", langue,
+                               source=incident.get("source_preuves") or traduire("simule", langue)))
+    return traduire("Mode simulé : {details}", langue, details=" ; ".join(parties)) if parties else None
 
 
 def style_incident(incident: dict | None) -> tuple[str, str, str]:
@@ -195,19 +201,20 @@ def libelle_decision(incident: dict, decision_locale: dict | None = None) -> str
     return "En attente"
 
 
-def resume_incident(incident: dict | None) -> str:
+def resume_incident(incident: dict | None, langue: str = "fr") -> str:
     if not isinstance(incident, dict):
-        return "Aucun incident."
+        return traduire("Aucun incident.", langue)
     statut = incident.get("statut", "?")
     if statut != "termine":
-        return f"{style_incident(incident)[0]}."
+        return f"{traduire(style_incident(incident)[0], langue)}."
     abstention = incident.get("decision_abstention") or {}
     if abstention.get("abstient"):
-        manque = ", ".join(abstention.get("manque") or []) or "non précisé"
-        return f"Abstention : aucun correctif proposé. Manque : {manque}."
+        manque = ", ".join(abstention.get("manque") or []) or traduire("non précisé", langue)
+        return traduire("Abstention : aucun correctif proposé. Manque : {manque}.", langue, manque=manque)
     correctif = incident.get("correctif") or {}
     risque = correctif.get("niveau_risque")
-    return f"Correctif proposé (risque : {risque})." if correctif else "Enquête terminée sans correctif."
+    return (traduire("Correctif proposé (risque : {risque}).", langue, risque=traduire(str(risque), langue))
+            if correctif else traduire("Enquête terminée sans correctif.", langue))
 
 
 def total_tokens(metriques: dict) -> int | None:
@@ -259,15 +266,16 @@ def lignes_compteur(comparaison: dict) -> list[dict]:
     ]
 
 
-def verdict_regle_60pc(comparaison: dict) -> str:
+def verdict_regle_60pc(comparaison: dict, langue: str = "fr") -> str:
     regle = comparaison.get("regle_60pc") or {}
     evenements, appels = regle.get("evenements_b_sur_a"), regle.get("appels_b_sur_a")
     if evenements is None or appels is None:
-        return "Règle des 60 % : non mesurable."
+        return traduire("Règle des 60 % : non mesurable.", langue)
     etat = "respectée" if regle.get("respecte") else "non respectée"
-    texte = f"Règle des 60 % {etat} : événements {evenements:.0%} de P1, appels LLM {appels:.0%}."
+    texte = traduire("Règle des 60 % {etat} : événements {evenements:.0%} de P1, appels LLM {appels:.0%}.",
+                     langue, etat=traduire(etat, langue), evenements=evenements, appels=appels)
     if comparaison.get("simulation"):
-        texte += " (simulé)"
+        texte += traduire(" (simulé)", langue)
     return texte
 
 
@@ -342,10 +350,10 @@ def _dot(texte) -> str:
     return str(texte).replace("\\", "\\\\").replace('"', "'")
 
 
-def dot_relations(graphe: dict) -> str:
+def dot_relations(graphe: dict, langue: str = "fr") -> str:
     noeuds = graphe.get("noeuds") or []
     if not noeuds:
-        return 'digraph relations { vide [label="aucune relation"]; }'
+        return 'digraph relations { vide [label="' + traduire("aucune relation", langue) + '"]; }'
     alias = {noeud["id"]: f"n{indice}" for indice, noeud in enumerate(noeuds)}
     lignes = ["digraph relations {", "  rankdir=LR;", '  node [style=filled, fontcolor=white, fontsize=10];']
     for noeud in noeuds:
@@ -353,14 +361,15 @@ def dot_relations(graphe: dict) -> str:
         lignes.append(f'  {alias[noeud["id"]]} [label="{_dot(noeud.get("libelle", ""))}", fillcolor="{couleur}"];')
     for arete in graphe.get("aretes") or []:
         if arete["source"] in alias and arete["cible"] in alias:
-            libelle = LIBELLES_RELATIONS.get(arete["type"], arete["type"])
+            libelle = traduire(LIBELLES_RELATIONS.get(arete["type"], arete["type"]), langue)
             lignes.append(f'  {alias[arete["source"]]} -> {alias[arete["cible"]]} [label="{_dot(libelle)}", fontsize=9];')
     lignes.append("}")
     return "\n".join(lignes)
 
 
-def tableau_relations(graphe: dict) -> list[dict]:
-    libelles = {noeud["id"]: f'{noeud.get("type")} : {noeud.get("libelle")}' for noeud in graphe.get("noeuds") or []}
+def tableau_relations(graphe: dict, langue: str = "fr") -> list[dict]:
+    libelles = {noeud["id"]: f'{traduire(str(noeud.get("type")), langue)} : {noeud.get("libelle")}'
+                for noeud in graphe.get("noeuds") or []}
     return [{"source": libelles.get(arete["source"], arete["source"]),
              "relation": LIBELLES_RELATIONS.get(arete["type"], arete["type"]),
              "cible": libelles.get(arete["cible"], arete["cible"])}

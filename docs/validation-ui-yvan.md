@@ -18,9 +18,10 @@ script de clic automatique ni dependance aux classes CSS du menu.
 
 ## Accessibilite
 
-La langue francaise est declaree explicitement sur le document et son corps via
-un script constant dans l'UI. Un test AppTest couvre cette declaration ; Chromium
-confirme `html.lang=fr` et `body.lang=fr`. Aucun contenu utilisateur n'entre dans ce script.
+La langue choisie est declaree explicitement sur le document et son corps via
+un script dans l'UI. Seules les valeurs fixes `fr` et `en` sont autorisees.
+AppTest couvre les deux declarations ; Chromium confirme le changement de
+`html.lang` et `body.lang`. Aucun texte libre utilisateur n'entre dans ce script.
 
 Un parcours a ete execute avec Orca 50.2, AT-SPI2 2.60.4 et Firefox Nightly 151.0,
 dans un affichage Xvfb et un bus D-Bus prives. Les annonces produites par Orca ont
@@ -39,6 +40,33 @@ voix anglaise pour certains libelles francais, malgre la declaration de langue
 verifiee dans Chromium. La prononciation francaise sous Firefox n'est donc pas
 validee. Une ecoute humaine et une recette NVDA/VoiceOver restent hors de ce controle.
 Ce parcours cible ne constitue pas un audit complet de conformite WCAG.
+
+## Interface bilingue
+
+Le selecteur `Langue / Language` propose Francais et English, avec le francais
+par defaut. Le choix reste propre a chaque session et est conserve pendant la
+navigation et les relancements, y compris apres une injection. Il ne constitue
+pas une preference de compte persistante apres la fin de la session.
+
+Les sept pages, boutons, filtres, tableaux, etats, resumes et erreurs UI sont
+traduits. Les identifiants, valeurs internes des filtres, preferences de colonnes,
+consentements et verrous de decision restent inchanges. La recherche prend en
+compte les libelles affiches en anglais sans changer les donnees sous-jacentes.
+
+Les textes recus de l'API (preuves, descriptions, justifications, refutations et
+details d'erreur), le SQL et les patchs restent dans leur langue originale.
+Aucun service de traduction ni appel LLM supplementaire n'est utilise. Les
+libelles natifs de Streamlit, comme `Deploy` et `Expand sidebar`, restent geres
+par le framework. La limite Firefox/Orca ci-dessus n'a pas ete revalidee.
+
+AppTest couvre les deux langues, les sept pages, l'isolation des sessions, les
+filtres et colonnes conserves, le consentement aux appels reels simule dans le
+test, le blocage sur incident incertain et l'absence de renvoi d'une decision.
+Chromium confirme la bascule apres injection sur ordinateur (1440 x 1000), puis
+les vues anglaises sur mobile Android emule (390 x 844), sans exception ni
+debordement horizontal constate. Captures Actions inspectees aux deux tailles.
+Le serveur UI a ete redemarre pour eliminer une ancienne version de l'exemple
+restee chargee en developpement ; l'API n'a pas ete redemarree.
 
 ## Services reels
 
@@ -65,5 +93,5 @@ pas une validation Zetaris/Postgres.
 
 ## Tests
 
-Suite complete en modes fake/fichier/json : **924 reussis, 3 ignores**.
+Suite complete en modes fake/fichier/json : **935 reussis, 3 ignores**.
 Les avertissements existants Pydantic et Starlette restent presents.

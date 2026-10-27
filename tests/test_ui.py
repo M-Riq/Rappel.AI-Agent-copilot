@@ -147,6 +147,188 @@ def test_streamlit_document_en_francais(page_directe):
     assert scripts[0].proto.unsafe_allow_javascript
 
 
+def test_streamlit_langue_persistante_sans_changer_de_page(page_directe):
+    page, _, _ = page_directe
+    page.run(timeout=15)
+    assert page.sidebar.selectbox(key="rappel_langue").value == "fr"
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert not page.exception
+    assert "document.documentElement.lang = 'en'" in page.get("html")[0].proto.body
+    page.switch_page("pages/2_Actions.py").run(timeout=15)
+    assert page.sidebar.selectbox(key="rappel_langue").value == "en"
+    page.sidebar.selectbox(key="rappel_langue").set_value("fr").run(timeout=15)
+    assert not page.exception
+    assert "document.documentElement.lang = 'fr'" in page.get("html")[0].proto.body
+
+
+def test_streamlit_langue_conserve_consentement_et_incertitude(page_directe):
+    page, client, zones = page_directe
+    client.sante = Mock(return_value={"llm": "meterless", "source": "zetaris", "memoire": "postgres"})
+    page.run(timeout=15)
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert not page.checkbox(key="rappel_accord_reel").value
+    assert "3 attempt(s)" in page.button(key="rappel_injecter").label
+    assert any("billable LLM calls" in element.value for element in page.warning)
+    page.checkbox(key="rappel_accord_reel").check().run()
+    assert "9 attempt(s)" in page.button(key="rappel_injecter").label
+    page.sidebar.selectbox(key="rappel_langue").set_value("fr").run(timeout=15)
+    assert page.checkbox(key="rappel_accord_reel").value
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert page.checkbox(key="rappel_accord_reel").value
+    page.session_state["rappel_courant"] = "incident-incertain"
+    client.lire_incident = Mock(side_effect=zones.ErreurApi("API coupée"))
+    page.run(timeout=15)
+    assert not page.exception
+    assert page.button(key="rappel_injecter").disabled
+    assert any("Incident status unconfirmed" in element.value for element in page.warning)
+    page.sidebar.selectbox(key="rappel_langue").set_value("fr").run(timeout=15)
+    assert page.button(key="rappel_injecter").disabled
+    assert page.session_state["rappel_rejeux"] == 0
+
+
+@pytest.mark.parametrize("statut,detail", [(None, None), (403, "Message original {API}"), (500, None)])
+def test_streamlit_erreurs_bilingues_sans_traduire_detail(page_directe, statut, detail):
+    page, client, zones = page_directe
+    client.sante = Mock(side_effect=zones.ErreurApi("API coupée ou indisponible.", statut, detail))
+    page.run(timeout=15)
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert not page.exception
+    attendu = (f"API error {statut}: {detail or 'request rejected'}" if statut
+               else "API offline or unavailable.")
+    assert attendu in [element.value for element in page.warning]
+    assert not any(element.key == "rappel_injecter" for element in page.button)
+
+
+def test_streamlit_sept_vues_en_anglais_et_sessions_independantes(page_directe, monkeypatch):
+    page, client, _ = page_directe
+    monkeypatch.setattr(requests, "get", Mock(side_effect=requests.ConnectionError("hors ligne")))
+    page.run(timeout=15)
+    page.button(key="rappel_injecter").click().run(timeout=15)
+    identifiant = page.session_state["rappel_courant"]
+    incident = client.lire_incident(identifiant)
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert not page.exception
+    assert page.sidebar.selectbox(key="rappel_langue").value == "en"
+    assert "document.documentElement.lang = 'en'" in page.get("html")[0].proto.body
+    assert "New investigation" in [element.value for element in page.subheader]
+    assert page.button(key="rappel_injecter").label.startswith("Inject failure and investigate")
+    autre_session = AppTest.from_file(str(APP)).run(timeout=15)
+    assert autre_session.sidebar.selectbox(key="rappel_langue").value == "fr"
+    assert "Nouvelle enquête" in [element.value for element in autre_session.subheader]
+    for chemin, titre in [
+        ("0_Incidents.py", "Incidents"),
+        ("1_Enquete_en_direct.py", "Investigation"),
+        ("2_Actions.py", "Actions"),
+        ("3_Memoire.py", "Memory"),
+        ("4_Compteurs.py", "Metrics"),
+        ("5_Relations.py", "Relationships"),
+        ("6_Exemple_P1.py", "P1 example"),
+    ]:
+        page.switch_page(f"pages/{chemin}").run(timeout=15)
+        assert not page.exception
+        assert titre in [element.value for element in page.title]
+        assert page.sidebar.selectbox(key="rappel_langue").value == "en"
+        assert page.sidebar.selectbox(key="rappel_choix_incident").value == identifiant
+        assert page.sidebar.selectbox(key="rappel_choix_incident").options == ["P1 · Investigation 1"]
+        if titre == "Actions":
+            assert page.button(key=f"rappel_appliquer_{identifiant}").label == "Apply"
+            assert page.button(key=f"rappel_refuser_{identifiant}").label == "Reject"
+            assert "Risk level" in [element.label for element in page.metric]
+            assert incident["correctif"]["patch"] in [element.value for element in page.code]
+            assert incident["correctif"]["description"] in [element.value for element in page.markdown]
+        if titre == "Memory":
+            assert "attempted fix" in page.table[0].value.columns
+            assert "unconfirmed" in page.table[0].value["outcome"].values
+        if titre == "Metrics":
+            assert "LLM calls" in page.table[0].value["metric"].values
+        if titre == "Relationships":
+            assert "has signature" in page.table[0].value["relation"].values
+            assert "target" in page.table[0].value.columns
+        if titre == "P1 example":
+            assert any("showing local fixture events" in element.value for element in page.warning)
+            assert page.multiselect(key="rappel_exemple_type").label == "Event types"
+            assert any("214 KeyError" in element.value for element in page.info)
+    assert page.session_state["rappel_rejeux"] == 1
+    page.sidebar.selectbox(key="rappel_langue").set_value("fr").run(timeout=15)
+    assert page.title[0].value == "Exemple P1"
+
+
+def test_streamlit_langue_preserve_selection_filtres_et_tableaux(page_directe):
+    page, _, _ = page_directe
+    page.run(timeout=15)
+    page.button(key="rappel_injecter").click().run(timeout=15)
+    premier = page.session_state["rappel_courant"]
+    page.selectbox(key="rappel_scenario").set_value("p2").run()
+    page.button(key="rappel_injecter").click().run(timeout=15)
+    dernier = page.session_state["rappel_courant"]
+    page.sidebar.selectbox(key="rappel_choix_incident").set_value(premier).run(timeout=15)
+    page.multiselect(key="rappel_historique_statut").set_value(["Enquête terminée"]).run()
+    page.selectbox(key="rappel_historique_tri").set_value("scénario").run()
+    page.checkbox(key="rappel_historique_decroissant").check().run()
+    colonnes = ["incident", "identifiant complet", "statut"]
+    page.multiselect(key="rappel_historique_colonnes").set_value(colonnes).run()
+    page.selectbox(key="rappel_historique_taille").set_value(25).run()
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert not page.exception
+    assert page.sidebar.selectbox(key="rappel_choix_incident").value == premier
+    assert page.multiselect(key="rappel_historique_statut").value == ["Enquête terminée"]
+    assert page.multiselect(key="rappel_historique_statut").options == ["Investigation completed"]
+    assert page.selectbox(key="rappel_historique_tri").value == "scénario"
+    assert page.checkbox(key="rappel_historique_decroissant").value
+    assert page.multiselect(key="rappel_historique_colonnes").value == colonnes
+    assert page.selectbox(key="rappel_historique_taille").value == 25
+    assert list(page.table[0].value.columns) == ["incident", "full identifier", "status"]
+    assert list(page.table[0].value["full identifier"]) == [dernier, premier]
+    page.text_input(key="rappel_historique_recherche").set_value("completed").run()
+    assert len(page.table[0].value) == 2
+    page.text_input(key="rappel_historique_recherche").set_value(premier).run()
+    page.sidebar.selectbox(key="rappel_langue").set_value("fr").run(timeout=15)
+    assert not page.exception
+    assert page.text_input(key="rappel_historique_recherche").value == premier
+    assert list(page.table[0].value["identifiant complet"]) == [premier]
+    assert page.session_state["rappel_courant"] == dernier
+    assert page.session_state["rappel_rejeux"] == 2
+    page.switch_page("pages/1_Enquete_en_direct.py").run(timeout=15)
+    evenements = page.session_state["rappel_evenements"][premier].copy()
+    page.multiselect(key="rappel_fil_type").set_value(["preuve"]).run()
+    etape = page.slider(key=f"rappel_etape_{premier}").value
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    assert page.multiselect(key="rappel_fil_type").value == ["preuve"]
+    assert "evidence" in page.multiselect(key="rappel_fil_type").options
+    assert page.slider(key=f"rappel_etape_{premier}").value == etape
+    assert page.session_state["rappel_evenements"][premier] == evenements
+    assert all("SQL query" in element.label for element in page.expander if "SQL" in element.label)
+    for evenement in evenements:
+        if evenement.get("type") == "preuve":
+            assert evenement["texte"] in [element.value for element in page.success]
+            if evenement.get("requete_sql"):
+                assert evenement["requete_sql"].strip() in [element.value for element in page.code]
+
+
+@pytest.mark.parametrize("confirmee", [True, False])
+def test_streamlit_decision_bilingue_ne_renvoie_jamais(page_directe, confirmee):
+    page, client, zones = page_directe
+    envoyer = Mock(wraps=client.decision) if confirmee else Mock(side_effect=zones.ErreurApi("API coupée"))
+    client.decision = envoyer
+    page.run(timeout=15)
+    page.button(key="rappel_injecter").click().run(timeout=15)
+    identifiant = page.session_state["rappel_courant"]
+    page.switch_page("pages/2_Actions.py").run(timeout=15)
+    page.sidebar.selectbox(key="rappel_langue").set_value("en").run(timeout=15)
+    page.button(key=f"rappel_refuser_{identifiant}").click().run(timeout=15)
+    assert not page.exception
+    if confirmee:
+        assert "Decision recorded: reject." in [element.value for element in page.info]
+    else:
+        assert any("Decision unconfirmed" in element.value for element in page.warning)
+    for langue in ("fr", "en"):
+        page.sidebar.selectbox(key="rappel_langue").set_value(langue).run(timeout=15)
+        assert not page.exception
+        assert page.button(key=f"rappel_appliquer_{identifiant}").disabled
+        assert page.button(key=f"rappel_refuser_{identifiant}").disabled
+    envoyer.assert_called_once_with(identifiant, "refuser")
+
+
 def test_streamlit_navigation_vues_isolees(page_directe):
     page, _, _ = page_directe
     page.run(timeout=15)
