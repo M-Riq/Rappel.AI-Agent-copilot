@@ -37,3 +37,8 @@ Règles :
 | 24 oct. 2026 | Fusion de `naomy/complement-modules` dans `main` sans relecture de Juan (pipeline_demo, ingestion, action) ni d'Yvan (ui, Langfuse) ; relecture à faire après la fusion | 626 tests passent en mode simulé ; débloquer l'intégration Meterless. Décision : Riq |
 | 25 oct. 2026 | Exception au gel pour H-MEM ; fusion seulement si tous les tests et la conformité sont verts | Intégration locale Python/SQLite ; aucun déploiement ni service cloud |
 | 25 oct. 2026 | PostgreSQL conservé en backend optionnel | H-MEM remplace la mémoire pour les nouveaux essais, mais la migration Postgres n'est pas encore validée contre un vrai Postgres et ses références/tests restent actifs |
+| 26 oct. 2026 | Zetaris : Riq reprend la responsabilité (au lieu de Juan) | réorganisation de l'équipe |
+| 26 oct. 2026 | API REST directe non exposée sur le cluster AWS (404 HTML) ; Rappel passe par la passerelle UI `/api/proxy/sql-editor/sqls/run-query` (`ZETARIS_CHEMIN_SQL`) | testé avec preflight.py (échec) et query_zetaris.py (succès) |
+| 26 oct. 2026 | `run_sql` de Rappel validé en réel : `SELECT 1 AS one` donne `[{"one": "1"}]` | scripts/check_zetaris.py |
+| 27 oct. 2026 | Données Rappel dans Zetaris : option B (CSV dans WorkspaceS3Bucket, us-west-2). Source postgres laissée en l'état (Not exist), en attente de Juan | aucune nouvelle ressource AWS ; Juan indisponible | 
+| 27 oct. 2026 | Pipeline de démo : orders_etl remplacé par transactions_etl (214 premières transactions synthétiques) ; P2 = amount en texte ("7.53 EUR") | même famille que P1 ; 934 tests verts |

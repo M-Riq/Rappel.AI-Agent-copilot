@@ -14,8 +14,8 @@ from rappel.pipeline_demo import injecter, reset
 
 
 def test_normalisation():
-    ligne = "2026-10-23T10:00:00.040000Z ERROR orders_etl: KeyError: 'amount' while transforming row 17"
-    assert normaliser(ligne) == "ERROR orders_etl: KeyError: 'amount' while transforming row <*>"
+    ligne = "2026-10-23T10:00:00.040000Z ERROR transactions_etl: KeyError: 'amount' while transforming row 17"
+    assert normaliser(ligne) == "ERROR transactions_etl: KeyError: 'amount' while transforming row <*>"
     assert normaliser("INFO job 3fa85f64-5717-4562-b3fc-2c963f66afa6 took 12.5 ms") == "INFO job <*> took <*> ms"
 
 
@@ -23,7 +23,7 @@ def test_p1_contexte_valide_et_reduit():
     injecter("p1")
     contexte, infos = construire_contexte()
     valider("contexte_incident", contexte)
-    assert contexte["signature"] == "schema_mismatch:orders_etl"
+    assert contexte["signature"] == "schema_mismatch:transactions_etl"
     assert len(contexte["logs"]) < 10 and infos["nb_lignes_logs"] > 200
     assert contexte["logs"][0]["template"].startswith("ALERT")
     erreur = next(modele for modele in contexte["logs"] if "KeyError: 'amount'" in modele["template"])
@@ -39,12 +39,12 @@ def test_p1_contexte_valide_et_reduit():
 def test_p2_detecte_et_p3_sans_ecart():
     injecter("p2")
     contexte, infos = construire_contexte()
-    assert infos["ecarts_schema"] == [{"ecart": "type", "colonne": "quantity", "attendu": "integer", "observe": "text"}]
-    assert contexte["signature"] == "schema_mismatch:orders_etl"
+    assert infos["ecarts_schema"] == [{"ecart": "type", "colonne": "amount", "attendu": "decimal", "observe": "text"}]
+    assert contexte["signature"] == "schema_mismatch:transactions_etl"
     injecter("p3")
     contexte, infos = construire_contexte()
     assert infos["ecarts_schema"] == [] and contexte["schema"]["attendu"] == contexte["schema"]["observe"]
-    assert contexte["signature"] == "timeout:orders_etl"
+    assert contexte["signature"] == "timeout:transactions_etl"
     assert contexte["metriques"]["latence_ms"] == 30000
     valider("contexte_incident", contexte)
 

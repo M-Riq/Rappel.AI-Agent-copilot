@@ -26,7 +26,7 @@ def test_vert_au_depart(tmp_path):
     etat = reset()
     assert etat["statut"] == "vert" and etat["lignes_rejetees"] == 0 and etat["alertes"] == []
     with sqlite3.connect(chemins()["sortie"]) as base:
-        assert base.execute("SELECT count(*) FROM orders_propres").fetchone()[0] == 214
+        assert base.execute("SELECT count(*) FROM transactions_propres").fetchone()[0] == 214
     journal = lignes_logs()
     assert 170 <= len(journal) <= 260
     assert any(" WARN " in ligne for ligne in journal) and not any(" ERROR " in ligne for ligne in journal)
@@ -44,12 +44,12 @@ def test_p1_panne_visible():
     assert "total:decimal" in schema_observe() and "amount:decimal" in schema_attendu()
 
 
-def test_p2_meme_famille_autre_colonne():
+def test_p2_meme_famille_meme_colonne():
     etat = injecter("p2")
     assert etat["statut"] == "rouge" and etat["lignes_rejetees"] == 214
-    assert "quantity:text" in schema_observe()
-    assert any("TypeError: quantity must be integer, got text" in ligne for ligne in lignes_logs())
-    assert commits()[-1]["message"] == "change quantity type to text"
+    assert "amount:text" in schema_observe() and "amount:decimal" in schema_attendu()
+    assert any("TypeError: amount must be decimal, got text" in ligne for ligne in lignes_logs())
+    assert commits()[-1]["message"] == "format amount with currency"
 
 
 def test_p3_cause_externe_ambigue():
