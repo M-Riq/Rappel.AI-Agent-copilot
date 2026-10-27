@@ -22,7 +22,7 @@ def test_p1_depuis_la_demo_colonne_renommee(client):
     assert reponse.status_code == 201
     corps = reponse.json()
     assert corps["id"] == "demo-p1" and corps["simulation"] is True and corps["source"] == "pipeline_demo"
-    assert corps["signature"] == "schema_mismatch:orders_etl" and corps["statut_pipeline"] == "rouge"
+    assert corps["signature"] == "schema_mismatch:transactions_etl" and corps["statut_pipeline"] == "rouge"
     resultat = client.get("/incidents/demo-p1").json()
     assert "colonne renommée" in resultat["correctif"]["justification"]
     assert client.post("/incidents/depuis-demo", json={"incident_id": "demo-p1"}).status_code == 409
@@ -31,7 +31,7 @@ def test_p1_depuis_la_demo_colonne_renommee(client):
 def test_sans_corps_identifiant_genere_et_contrat_inchange(client):
     injecter("p3")
     corps = client.post("/incidents/depuis-demo").json()
-    assert corps["id"].startswith("demo-p3-") and corps["signature"] == "timeout:orders_etl"
+    assert corps["id"].startswith("demo-p3-") and corps["signature"] == "timeout:transactions_etl"
     assert client.get(f"/incidents/{corps['id']}").json()["decision_abstention"]["abstient"]
     assert client.post("/incidents", json={"incident_id": "incomplet"}).status_code == 422
 
@@ -52,5 +52,5 @@ def test_script_api(monkeypatch, capsys):
     poster = MagicMock(return_value=reponse)
     monkeypatch.setattr(incident_depuis_demo.requests, "post", poster)
     assert incident_depuis_demo.main(["--scenario", "p2"]) == 0
-    assert poster.call_args.kwargs["json"]["signature"] == "schema_mismatch:orders_etl"
+    assert poster.call_args.kwargs["json"]["signature"] == "schema_mismatch:transactions_etl"
     assert "demo-x" in capsys.readouterr().out

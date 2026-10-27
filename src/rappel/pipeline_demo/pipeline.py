@@ -63,20 +63,18 @@ def _iso(instant: datetime) -> str:
 
 
 def _lignes_initiales() -> tuple[list[str], list[dict]]:
+    """Les nb_lignes premières transactions du CSV synthétique (fichier source jamais modifié)."""
     colonnes = list(SCENARIOS["schema_attendu"])
-    lignes = []
-    for indice in range(1, SCENARIOS["nb_lignes"] + 1):
-        valeurs = {
-            "integer": str((indice % 5) + 1),
-            "decimal": f"{10 + (indice * 37) % 500}.{indice % 100:02d}",
-            "text": f"client-{indice % 17:02d}",
-        }
-        ligne = {}
-        for position, (nom, type_colonne) in enumerate(SCENARIOS["schema_attendu"].items()):
-            # Premiere colonne entiere = identifiant ; les suivantes, des quantites.
-            ligne[nom] = str(indice) if position == 0 else valeurs[type_colonne]
-        lignes.append(ligne)
-    return colonnes, lignes
+    source = RACINE / SCENARIOS["fichier_source"]
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"Données de démo absentes ({SCENARIOS['fichier_source']}) : lancer python scripts/generate_demo_data.py"
+        )
+    entete, lignes = _lire_csv(source)
+    manquantes = [colonne for colonne in colonnes if colonne not in entete]
+    if manquantes:
+        raise ValueError(f"Colonnes absentes du fichier source : {', '.join(manquantes)}")
+    return colonnes, [{colonne: ligne[colonne] for colonne in colonnes} for ligne in lignes[:SCENARIOS["nb_lignes"]]]
 
 
 def _ecrire_csv(chemin: Path, colonnes: list[str], lignes: list[dict]) -> None:
@@ -220,7 +218,7 @@ def executer_pipeline(dossier=None) -> dict:
     log("INFO", f"{composant}: expected schema {', '.join(f'{nom}:{typ}' for nom, typ in attendu.items())}")
     log("INFO", "scheduler: worker ready, slots=4")
     for tentative in range(1, environnement.get("nb_timeouts", 0) + 1):
-        log("WARN", f"{composant}: TimeoutError: orders source request exceeded {environnement['latence_ms']} ms; retry {tentative}")
+        log("WARN", f"{composant}: TimeoutError: {SCENARIOS['table_entree']} source request exceeded {environnement['latence_ms']} ms; retry {tentative}")
     _, lignes = lignes_transformees(dossier)
     acceptees, rejets = [], 0
     for indice, ligne in enumerate(lignes, start=1):
