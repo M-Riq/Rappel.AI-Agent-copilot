@@ -41,8 +41,18 @@ class RunSqlZetaris:                     # src/rappel/interfaces/run_sql.py
 ```
 
 `RunSqlZetaris` applique `valider_sql`, puis appelle `tools_zetaris.run_sql` du squelette
-(une instruction, `X-Request-ID` neuf, Authorization Bearer, `X-Org-ID`) et convertit
-les lignes (dictionnaires) en `colonnes` / `lignes`.
+(une instruction, UUID v4 neuf dans `queryId` et `X-Request-ID`, Authorization Bearer,
+`X-Org-ID`) et convertit les lignes (dictionnaires) en `colonnes` / `lignes`. Le corps
+REST suit le contrat confirmé pour l'instance Zetaris :
+
+```json
+{
+  "queryId": "<UUID v4 neuf>",
+  "sql": "SELECT 1",
+  "limit": 20,
+  "source": "SqlEditor"
+}
+```
 
 `ResultatSql` (Pydantic, `extra="forbid"`) :
 

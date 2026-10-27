@@ -5,3 +5,5 @@ __pycache__/
 data/
 *.log
 .pytest_cache/
+Zetaris.pdf
+Equipe.pdf

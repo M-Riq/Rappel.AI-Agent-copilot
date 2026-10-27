@@ -145,9 +145,16 @@ def test_zetaris_rest(monkeypatch):
         assert params["headers"]["Authorization"] == "Bearer " + "cle-test-factice"
         assert params["headers"]["X-Org-ID"] == "1"
         UUID(params["headers"]["X-Request-ID"])
-        assert params["json"] == {"sql": "SELECT 1 AS one"}
+        UUID(params["json"]["queryId"], version=4)
+        assert params["json"] == {
+            "queryId": params["json"]["queryId"],
+            "sql": "SELECT 1 AS one",
+            "limit": 20,
+            "source": "SqlEditor",
+        }
         # Délais séparés connexion / lecture (ZETARIS_DELAI_S).
         assert params["timeout"] == (10.0, 60.0)
+    assert appels[0][1]["json"]["queryId"] != appels[1][1]["json"]["queryId"]
     assert appels[0][1]["headers"]["X-Request-ID"] != appels[1][1]["headers"]["X-Request-ID"]
     assert RUN_SQL_TOOL["function"]["name"] == "run_sql"
 
