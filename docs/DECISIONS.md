@@ -42,3 +42,6 @@ Règles :
 | 26 oct. 2026 | `run_sql` de Rappel validé en réel : `SELECT 1 AS one` donne `[{"one": "1"}]` | scripts/check_zetaris.py |
 | 27 oct. 2026 | Données Rappel dans Zetaris : option B (CSV dans WorkspaceS3Bucket, us-west-2). Source postgres laissée en l'état (Not exist), en attente de Juan | aucune nouvelle ressource AWS ; Juan indisponible | 
 | 27 oct. 2026 | Pipeline de démo : orders_etl remplacé par transactions_etl (214 premières transactions synthétiques) ; P2 = amount en texte ("7.53 EUR") | même famille que P1 ; 934 tests verts |
+| 27 oct. 2026 | CSV déposés dans WorkspaceS3Bucket : `rappel/transactions/` et `rappel/schema_contract/` (ETag = md5 local) | source de données Zetaris, aucune nouvelle ressource AWS |
+| 27 oct. 2026 | Cluster sans rôle IAM S3 : utilisateur IAM `rappel-zetaris-lecture` (lecture seule sur `rappel/*`) ; clé dans OPTIONS des tables Zetaris, jamais dans Git | à supprimer après le hackathon |
+| 27 oct. 2026 | `run_sql` : noms `schema.table` acceptés seulement s'ils sont en liste blanche ; `rappel.transactions` et `rappel.schema_contract` ajoutés au mode Zetaris | réel : `COUNT(*)` = 500 via RunSqlZetaris |

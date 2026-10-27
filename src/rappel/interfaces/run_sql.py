@@ -22,6 +22,9 @@ TABLES: dict[str, dict[str, str]] = {
     "colonnes_observees": {"nom": "TEXT", "type": "TEXT"},
     "metriques": {"nom": "TEXT", "valeur": "REAL"},
 }
+# Tables de données exposées par Zetaris (base Lightning « rappel », fichiers S3) : mode réel uniquement.
+TABLES_DONNEES_ZETARIS: tuple[str, ...] = ("rappel.transactions", "rappel.schema_contract")
+
 LIMITE_LIGNES = 50
 LONGUEUR_MAX_SQL = 4000
 DELAI_MAX_EXECUTION_S = 2.0
@@ -175,9 +178,15 @@ def _tables_referencees(jetons: list[str]) -> set[str]:
             if courant == "(":
                 indice = _fin_parenthese(jetons, indice) + 1
             elif _est_identifiant(courant):
+                nom = courant
                 if indice + 1 < len(jetons) and jetons[indice + 1] == ".":
-                    raise _RequeteRefusee("noms de tables qualifies interdits")
-                tables.add(courant)
+                    # schema.table seulement (deux niveaux) ; la liste blanche tranche ensuite.
+                    if (indice + 2 >= len(jetons) or not _est_identifiant(jetons[indice + 2])
+                            or (indice + 3 < len(jetons) and jetons[indice + 3] == ".")):
+                        raise _RequeteRefusee("noms de tables qualifies interdits")
+                    nom = f"{courant}.{jetons[indice + 2]}"
+                    indice += 2
+                tables.add(nom)
                 indice += 1
                 if indice < len(jetons) and jetons[indice] == "(":
                     indice = _fin_parenthese(jetons, indice) + 1
@@ -272,6 +281,9 @@ def valider_sql(sql: str, tables_autorisees) -> ValidationSql:
             raise _RequeteRefusee("seules les requetes SELECT ou WITH ... SELECT sont autorisees")
         autorisees = {nom.lower() for nom in tables_autorisees}
         tables = _tables_referencees(jetons)
+        # Nom qualifie (schema.table) hors liste blanche : meme refus qu'avant.
+        if any("." in nom for nom in tables - autorisees):
+            raise _RequeteRefusee("noms de tables qualifies interdits")
         hors_liste = sorted(tables - autorisees - _noms_cte(jetons))
         if hors_liste:
             raise _RequeteRefusee("table hors liste blanche : " + ", ".join(hors_liste))
@@ -403,7 +415,7 @@ class RunSqlZetaris:
     def __init__(self, contexte: ContexteIncident | dict, configuration: Configuration | None = None) -> None:
         self.contexte = contexte
         self.configuration = configuration or charger()
-        self.tables_autorisees = tuple(TABLES)
+        self.tables_autorisees = tuple(TABLES) + TABLES_DONNEES_ZETARIS
 
     def __repr__(self) -> str:
         return f"RunSqlZetaris(mode={self.mode!r})"
