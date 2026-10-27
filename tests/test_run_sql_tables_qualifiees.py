@@ -2,11 +2,17 @@
 
 import pytest
 
+from rappel.config import Configuration
 from rappel.interfaces.run_sql import (
-    TABLES_DONNEES_ZETARIS, RunSqlSQLite, RunSqlZetaris, valider_sql,
+    TABLES_DONNEES_ZETARIS, RunSqlSQLite, RunSqlZetaris, creer_run_sql, valider_sql,
 )
 
 AUTORISEES = ("logs",) + TABLES_DONNEES_ZETARIS
+CONTEXTE_MINIMAL = {
+    "incident_id": "t", "horodatage": "2026-10-27T00:00:00Z", "signature": "s",
+    "logs": [], "commits_recents": [], "schema": {"attendu": [], "observe": []},
+    "metriques": {},
+}
 
 
 def test_table_qualifiee_autorisee():
@@ -43,12 +49,21 @@ def test_ecriture_toujours_refusee():
 
 
 def test_seul_le_mode_zetaris_expose_rappel():
-    contexte = {
-        "incident_id": "t", "horodatage": "2026-10-27T00:00:00Z", "signature": "s",
-        "logs": [], "commits_recents": [], "schema": {"attendu": [], "observe": []},
-        "metriques": {},
-    }
-    assert "rappel.transactions" in RunSqlZetaris(contexte).tables_autorisees
-    simulation = RunSqlSQLite(contexte)
+    zetaris = RunSqlZetaris(CONTEXTE_MINIMAL, Configuration(source_provider="zetaris"))
+    assert "rappel.transactions" in zetaris.tables_autorisees
+    simulation = RunSqlSQLite(CONTEXTE_MINIMAL)
     assert "rappel.transactions" not in simulation.tables_autorisees
     simulation.fermer()
+
+
+def test_run_sql_zetaris_refuse_le_mode_fichier():
+    """Issue #15 : plus d'interrogation silencieuse des fixtures locales."""
+    with pytest.raises(ValueError, match="SOURCE_PROVIDER=zetaris"):
+        RunSqlZetaris(CONTEXTE_MINIMAL, Configuration(source_provider="fichier"))
+
+
+def test_creer_run_sql_choisit_le_bon_backend():
+    simulation = creer_run_sql(CONTEXTE_MINIMAL, Configuration(source_provider="fichier"))
+    assert isinstance(simulation, RunSqlSQLite)
+    simulation.fermer()
+    assert isinstance(creer_run_sql(CONTEXTE_MINIMAL, Configuration(source_provider="zetaris")), RunSqlZetaris)

@@ -47,3 +47,4 @@ Règles :
 | 27 oct. 2026 | `run_sql` : noms `schema.table` acceptés seulement s'ils sont en liste blanche ; `rappel.transactions` et `rappel.schema_contract` ajoutés au mode Zetaris | réel : `COUNT(*)` = 500 via RunSqlZetaris |
 | 27 oct. 2026 | Mode zetaris : schéma attendu lu dans `rappel.schema_contract` (types traduits vers integer/decimal/text, timestamp → text) ; pas de repli silencieux sur la config locale | réel : P1 détecté (amount manquante, total nouvelle) ; mode fichier inchangé |
 | 27 oct. 2026 | Protection de `main` retirée : fusion sans approbation obligatoire pendant le hackathon | relecteurs peu disponibles ; tests complets avant chaque fusion |
+| 27 oct. 2026 | `RunSqlZetaris` refuse une configuration autre que `SOURCE_PROVIDER=zetaris` (issue #15) | plus d'interrogation silencieuse des fixtures locales |
